@@ -1,0 +1,76 @@
+{
+  "file": "agent-routing-paper-framework.drawio",
+  "summary": {
+    "total_findings": 4,
+    "fail": 0,
+    "warn": 4,
+    "passed": true,
+    "clean": false
+  },
+  "fails": [],
+  "warns": [
+    {
+      "rule": "text-overflow-vertical",
+      "element_id": "figure_title",
+      "message": "Text in 'figure_title' may overflow vertically (borderline): estimated 62px needed, container is 46px tall. Verify with screenshot — draw.io may fit the text.",
+      "detail": {
+        "estimated_height": 62.1,
+        "container_height": 46.0,
+        "font_size": 23.0,
+        "text_preview": "Learning When to Commit"
+      }
+    },
+    {
+      "rule": "font-box-cavernous",
+      "element_id": "rollout_trace",
+      "message": "Box 'rollout_trace' is 160px tall with effective fontSize=15.0 (ratio 10.7:1). Text will look tiny and lost. Either shrink box or increase font.",
+      "detail": {
+        "box_height": 160.0,
+        "font_size": 15.0,
+        "ratio": 10.7
+      }
+    },
+    {
+      "rule": "spacing-inconsistent-v",
+      "element_id": "frozen_extractor",
+      "message": "Column at x≈1245: vertical gaps vary (gaps=['9', '9', '236', '8', '8', '8', '23'], mean=43, cv=1.84). Use uniform spacing.",
+      "detail": {
+        "col_x": 1245,
+        "gaps": [
+          9.0,
+          9.0,
+          236.0,
+          8.0,
+          8.0,
+          8.0,
+          23.0
+        ],
+        "mean": 43.0,
+        "cv": 1.84,
+        "element_ids": [
+          "frozen_extractor",
+          "frozen_reasoner",
+          "frozen_verifier",
+          "reward_final",
+          "reward_drafts",
+          "reward_missing",
+          "reward_cost",
+          "manager_grpo"
+        ]
+      }
+    },
+    {
+      "rule": "edge-density-hotspot",
+      "element_id": "*",
+      "message": "Cell (200,600) has 8 edge segments — potential arrow spaghetti. Reroute connectors or add explicit waypoints.",
+      "detail": {
+        "cell_x": 200,
+        "cell_y": 600,
+        "edge_count": 8
+      }
+    }
+  ],
+  "vertex_count": 43,
+  "edge_count": 18,
+  "canvas": "1718x744"
+}

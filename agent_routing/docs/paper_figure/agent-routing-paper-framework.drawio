@@ -1,0 +1,245 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="Codex" version="26.0.9" pages="1">
+  <diagram id="learning-when-to-commit" name="Paper Framework">
+    <mxGraphModel dx="1718" dy="744" grid="1" gridSize="5" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1718" pageHeight="744" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="figure_title" value="Learning When to Commit" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;overflow=visible;fontFamily=Comic Sans MS;fontSize=21;fontColor=#B5150B;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="48" y="8" width="305" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="figure_subtitle" value="Delegate-or-commit routing learned from binary task outcomes" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;overflow=visible;fontFamily=Comic Sans MS;fontSize=16;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="310" y="16" width="1050" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="goal_panel" value="Research Goal&#10;&#10;A Manager decides whether to&#10;consult another frozen advisor&#10;or COMMIT its current answer." style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#C4C4C4;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=14;fontColor=#020202;fontStyle=1;align=left;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="62" y="62" width="218" height="152" as="geometry" />
+        </mxCell>
+        <mxCell id="task_heading" value="MCQ Task Stream" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;overflow=visible;fontFamily=Comic Sans MS;fontSize=17;fontColor=#B5150B;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="76" y="226" width="185" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="task_panel" value="Benchmarks&#10;&#10;MedQA&#10;LegalBench&#10;MMLU-Pro&#10;GPQA&#10;&#10;Question + Context" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#C4C4C4;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=14;fontColor=#020202;fontStyle=1;align=left;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="62" y="255" width="218" height="294" as="geometry" />
+        </mxCell>
+        <mxCell id="choices_label" value="Answer Space" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;overflow=visible;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="82" y="459" width="90" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="answer_space" value="Multiple-choice options  A–D" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#426B9D;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="88" y="488" width="156" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="task_cache" value="Normalized&#10;Task Pool" style="shape=cylinder3;rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#F2F2F2;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=13;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="102" y="572" width="138" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="hidden_gt" value="Ground truth is hidden&#10;from the routing policy" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;overflow=visible;fontFamily=Comic Sans MS;fontSize=10;fontColor=#B5150B;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="82" y="650" width="178" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="choices_to_cache" value="normalize" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#426B9D;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#426B9D;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="answer_space" target="task_cache">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="stage1" value="Stage 1: Build Frozen Advisors &amp; Cold-start the Manager" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#C4C4C4;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=20;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="300" y="62" width="1350" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="teacher_synth" value="Teacher Synthesis&#10;&#10;GPT / Claude / DeepSeek&#10;creates specialist signals&#10;from benchmark questions" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#F2F2F2;strokeColor=#C4C4C4;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=12;fontColor=#020202;fontStyle=1;align=left;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="330" y="105" width="205" height="118" as="geometry" />
+        </mxCell>
+        <mxCell id="quality_gates" value="Quality Gates&#10;&#10;JSON parse&#10;Pydantic schema&#10;choice coverage&#10;symmetric leakage audit" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C4C4C4;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=13;fontColor=#020202;fontStyle=1;align=left;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="570" y="105" width="190" height="118" as="geometry" />
+        </mxCell>
+        <mxCell id="advisor_data" value="Synthetic Advisor Data" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#426B9D;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=15;fontColor=#B5150B;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="800" y="90" width="225" height="172" as="geometry" />
+        </mxCell>
+        <mxCell id="data_extractor" value="Extractor&#10;Evidence signals" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="820" y="128" width="185" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="data_reasoner" value="Reasoner&#10;Neutral decision scaffold" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="820" y="171" width="185" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="data_verifier" value="Verifier&#10;Current-draft audit" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="820" y="214" width="185" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="advisor_sft" value="✦&#10;LoRA-SFT&#10;× 3" style="rounded=1;arcSize=18;whiteSpace=wrap;html=1;fillColor=#FDFAF5;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=14;fontColor=#6762E3;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1065" y="112" width="120" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="frozen_toolkit" value="Frozen Advisors (Signals Only)" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=13;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1225" y="86" width="245" height="176" as="geometry" />
+        </mxCell>
+        <mxCell id="frozen_extractor" value="Extractor  →  evidence" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1245" y="126" width="205" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="frozen_reasoner" value="Reasoner  →  scaffold" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1245" y="169" width="205" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="frozen_verifier" value="Verifier  →  draft audit" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1245" y="212" width="205" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="coldstart_demo" value="Manager Cold-start Demonstrations&#10;DRAFT_ANSWER  →  delegate(tool)  →  advisor signal  →  ...  →  ANSWER" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FDFAF5;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=12;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="480" y="284" width="760" height="62" as="geometry" />
+        </mxCell>
+        <mxCell id="manager_sft" value="✦  Manager_SFT&#10;Qwen3-8B" style="rounded=1;arcSize=18;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=14;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1290" y="286" width="210" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="task_to_teacher" value="sample" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="task_panel" target="teacher_synth">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="290" y="402" />
+              <mxPoint x="315" y="402" />
+              <mxPoint x="315" y="164" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="teacher_to_gates" value="generate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="teacher_synth" target="quality_gates">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="gates_to_data" value="accept" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#426B9D;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#426B9D;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="quality_gates" target="data_reasoner">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="data_to_sft" value="train" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#426B9D;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#426B9D;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="data_reasoner" target="advisor_sft">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sft_to_toolkit" value="freeze" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#6A884E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="advisor_sft" target="frozen_reasoner">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="task_to_demo" value="questions" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="task_panel" target="coldstart_demo">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="285" y="360" />
+              <mxPoint x="290" y="360" />
+              <mxPoint x="290" y="315" />
+              <mxPoint x="460" y="315" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="toolkit_to_demo" value="tool traces" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#6A884E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="frozen_verifier" target="coldstart_demo">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1348" y="274" />
+              <mxPoint x="1348" y="268" />
+              <mxPoint x="860" y="268" />
+              <mxPoint x="860" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="demo_to_manager" value="SFT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#DBB69E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="coldstart_demo" target="manager_sft">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="stage2" value="Stage 2: Learn the Delegate-or-Commit Policy with GRPO" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#C4C4C4;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=20;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="300" y="410" width="1350" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="rollout_manager" value="✦&#10;Manager_SFT&#10;Qwen3-8B&#10;&#10;rollout" style="rounded=1;arcSize=18;whiteSpace=wrap;html=1;fillColor=#FDFAF5;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=16;fontColor=#6762E3;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="330" y="478" width="112" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="rollout_trace" value="Rollout Trace&#10;&#10;Draft₀&#10;→ action₀&#10;→ signal₀&#10;→ Draft₁&#10;→ ...&#10;→ COMMIT" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#DBB69E;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=16;fontColor=#020202;fontStyle=1;align=left;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="475" y="475" width="190" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="routing_actions" value="Routing Actions (≤1 each)" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#DBB69E;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=14;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="700" y="447" width="205" height="222" as="geometry" />
+        </mxCell>
+        <mxCell id="act_extractor" value="Consult Extractor" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="720" y="490" width="165" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="act_reasoner" value="Consult Reasoner" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="720" y="530" width="165" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="act_verifier" value="Consult Verifier" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#D6E1F5;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="720" y="570" width="165" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="act_commit" value="COMMIT current answer" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FCE1D6;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="720" y="620" width="165" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="runtime_advisors" value="Frozen Advisors — Signals Only" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=15;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="940" y="447" width="245" height="222" as="geometry" />
+        </mxCell>
+        <mxCell id="sig_extractor" value="Extractor&#10;key evidence" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="960" y="490" width="205" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="sig_reasoner" value="Reasoner&#10;choice-aware scaffold" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="960" y="542" width="205" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="sig_verifier" value="Verifier&#10;audits current_draft" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=11;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="960" y="594" width="205" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="binary_reward" value="Binary Outcome Reward" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;strokeColor=#DBB69E;strokeWidth=1.5;dashed=1;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=16;fontColor=#B5150B;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1215" y="447" width="245" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="reward_correct" value="Correct final answer  →  1" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#FCE1D6;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=12;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="489" width="205" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="reward_incorrect" value="Incorrect final answer  →  0" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#F2F2F2;strokeColor=#FFFFFF;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=12;fontColor=#020202;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1235" y="533" width="205" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="manager_grpo" value="✦  Manager_GRPO&#10;Qwen3-8B" style="rounded=1;arcSize=18;whiteSpace=wrap;html=1;fillColor=#EFF7EA;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=14;fontColor=#0D2507;fontStyle=1;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1225" y="600" width="225" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="evaluation" value="Evaluation&#10;&#10;Accuracy&#10;Avg. consultations&#10;Oracle regret&#10;Risk–coverage&#10;Held-out transfer" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=10 8;fontFamily=Comic Sans MS;fontSize=16;fontColor=#020202;fontStyle=1;align=left;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1455" y="475" width="165" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="task_to_rollout" value="input" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="task_cache" target="rollout_manager">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="632" />
+              <mxPoint x="310" y="632" />
+              <mxPoint x="310" y="558" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="manager_to_trace" value="rollout" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="rollout_manager" target="rollout_trace">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="trace_to_actions" value="parse" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="rollout_trace" target="act_reasoner">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="actions_to_advisors" value="delegate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#6A884E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="act_reasoner" target="sig_reasoner">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="advisors_to_trace" value="signal + revised draft" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#6A884E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="sig_verifier" target="rollout_trace">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="666" />
+              <mxPoint x="570" y="666" />
+              <mxPoint x="570" y="640" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="trace_to_reward" value="final answer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#DBB69E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="rollout_trace" target="reward_correct">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="570" y="392" />
+              <mxPoint x="1338" y="392" />
+              <mxPoint x="1338" y="443" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="reward_to_grpo" value="binary reward" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#DBB69E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#DBB69E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="reward_incorrect" target="manager_grpo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="grpo_to_manager" value="policy update" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#6A884E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="manager_grpo" target="rollout_manager">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1210" y="700" />
+              <mxPoint x="385" y="700" />
+              <mxPoint x="385" y="665" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="commit_to_eval" value="COMMIT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#020202;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#020202;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="act_commit" target="evaluation">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="905" y="688" />
+              <mxPoint x="1450" y="688" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="grpo_to_eval" value="eval" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#6A884E;strokeWidth=1.5;dashed=0;dashPattern=7 5;fontFamily=Comic Sans MS;fontSize=10;fontColor=#6A884E;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="manager_grpo" target="evaluation">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1465" y="665" />
+              <mxPoint x="1538" y="665" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="contribution" value="Binary outcome feedback teaches the policy whether to consult again or COMMIT." style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;overflow=visible;fontFamily=Comic Sans MS;fontSize=12;fontColor=#B5150B;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="590" y="718" width="820" height="18" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,387 @@
+{
+  "file": "agent-routing-paper-framework.drawio",
+  "summary": {
+    "total_findings": 28,
+    "fail": 13,
+    "warn": 15,
+    "passed": false,
+    "clean": false
+  },
+  "fails": [
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "gates_to_data",
+      "message": "Edge 'gates_to_data' passes through box 'data_reasoner' (820,171 185×36)",
+      "detail": {
+        "edge_id": "gates_to_data",
+        "box_id": "data_reasoner",
+        "box_type": "shape",
+        "box_rect": "820,171 185×36",
+        "segment": "(665,164)→(912,176)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "data_to_sft",
+      "message": "Edge 'data_to_sft' passes through box 'data_reasoner' (820,171 185×36)",
+      "detail": {
+        "edge_id": "data_to_sft",
+        "box_id": "data_reasoner",
+        "box_type": "shape",
+        "box_rect": "820,171 185×36",
+        "segment": "(912,176)→(1125,176)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "sft_to_toolkit",
+      "message": "Edge 'sft_to_toolkit' passes through box 'frozen_reasoner' (1245,169 205×34)",
+      "detail": {
+        "edge_id": "sft_to_toolkit",
+        "box_id": "frozen_reasoner",
+        "box_type": "shape",
+        "box_rect": "1245,169 205×34",
+        "segment": "(1125,176)→(1348,174)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "toolkit_to_demo",
+      "message": "Edge 'toolkit_to_demo' passes through box 'frozen_reasoner' (1245,169 205×34)",
+      "detail": {
+        "edge_id": "toolkit_to_demo",
+        "box_id": "frozen_reasoner",
+        "box_type": "shape",
+        "box_rect": "1245,169 205×34",
+        "segment": "(1348,174)→(1348,274)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "trace_to_actions",
+      "message": "Edge 'trace_to_actions' passes through box 'act_reasoner' (720,530 165×32)",
+      "detail": {
+        "edge_id": "trace_to_actions",
+        "box_id": "act_reasoner",
+        "box_type": "shape",
+        "box_rect": "720,530 165×32",
+        "segment": "(570,558)→(802,558)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "actions_to_advisors",
+      "message": "Edge 'actions_to_advisors' passes through box 'act_reasoner' (720,530 165×32)",
+      "detail": {
+        "edge_id": "actions_to_advisors",
+        "box_id": "act_reasoner",
+        "box_type": "shape",
+        "box_rect": "720,530 165×32",
+        "segment": "(802,558)→(1062,558)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "advisors_to_trace",
+      "message": "Edge 'advisors_to_trace' passes through box 'sig_reasoner' (960,542 205×42)",
+      "detail": {
+        "edge_id": "advisors_to_trace",
+        "box_id": "sig_reasoner",
+        "box_type": "shape",
+        "box_rect": "960,542 205×42",
+        "segment": "(1062,558)→(1060,690)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "trace_to_reward",
+      "message": "Edge 'trace_to_reward' passes through box 'reward_final' (1235,486 205×24)",
+      "detail": {
+        "edge_id": "trace_to_reward",
+        "box_id": "reward_final",
+        "box_type": "shape",
+        "box_rect": "1235,486 205×24",
+        "segment": "(1338,443)→(1338,520)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "reward_to_grpo",
+      "message": "Edge 'reward_to_grpo' passes through box 'reward_drafts' (1235,516 205×24)",
+      "detail": {
+        "edge_id": "reward_to_grpo",
+        "box_id": "reward_drafts",
+        "box_type": "shape",
+        "box_rect": "1235,516 205×24",
+        "segment": "(1338,520)→(1338,652)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "commit_to_eval",
+      "message": "Edge 'commit_to_eval' passes through box 'act_reasoner' (720,530 165×32)",
+      "detail": {
+        "edge_id": "commit_to_eval",
+        "box_id": "act_reasoner",
+        "box_type": "shape",
+        "box_rect": "720,530 165×32",
+        "segment": "(802,558)→(905,636)"
+      }
+    },
+    {
+      "rule": "arrow-box-collision",
+      "element_id": "commit_to_eval",
+      "message": "Edge 'commit_to_eval' passes through box 'sig_verifier' (960,594 205×42)",
+      "detail": {
+        "edge_id": "commit_to_eval",
+        "box_id": "sig_verifier",
+        "box_type": "shape",
+        "box_rect": "960,594 205×42",
+        "segment": "(905,636)→(1475,636)"
+      }
+    },
+    {
+      "rule": "text-overflow-vertical",
+      "element_id": "figure_title",
+      "message": "Text in 'figure_title' overflows vertically: estimated 62px needed, container is 34px tall. Text: \"Learning When to Commit\" (fontSize=23.0, width=248)",
+      "detail": {
+        "estimated_height": 62.1,
+        "container_height": 34.0,
+        "font_size": 23.0,
+        "text_preview": "Learning When to Commit"
+      }
+    },
+    {
+      "rule": "element-overlap-row",
+      "element_id": "reward_drafts",
+      "message": "Boxes 'reward_drafts' and 'reward_missing' overlap horizontally in row (gap=-205px). Adjust positions.",
+      "detail": {
+        "box_a": "reward_drafts",
+        "box_b": "reward_missing",
+        "gap": -205.0
+      }
+    }
+  ],
+  "warns": [
+    {
+      "rule": "font-box-cavernous",
+      "element_id": "quality_gates",
+      "message": "Box 'quality_gates' is 128px tall with effective fontSize=12.0 (ratio 10.7:1). Text will look tiny and lost. Either shrink box or increase font.",
+      "detail": {
+        "box_height": 128.0,
+        "font_size": 12.0,
+        "ratio": 10.7
+      }
+    },
+    {
+      "rule": "font-box-cavernous",
+      "element_id": "rollout_manager",
+      "message": "Box 'rollout_manager' is 194px tall with effective fontSize=14.0 (ratio 13.9:1). Text will look tiny and lost. Either shrink box or increase font.",
+      "detail": {
+        "box_height": 194.0,
+        "font_size": 14.0,
+        "ratio": 13.9
+      }
+    },
+    {
+      "rule": "font-box-cavernous",
+      "element_id": "rollout_trace",
+      "message": "Box 'rollout_trace' is 222px tall with effective fontSize=13.0 (ratio 17.1:1). Text will look tiny and lost. Either shrink box or increase font.",
+      "detail": {
+        "box_height": 222.0,
+        "font_size": 13.0,
+        "ratio": 17.1
+      }
+    },
+    {
+      "rule": "font-box-cavernous",
+      "element_id": "evaluation",
+      "message": "Box 'evaluation' is 216px tall with effective fontSize=12.0 (ratio 18.0:1). Text will look tiny and lost. Either shrink box or increase font.",
+      "detail": {
+        "box_height": 216.0,
+        "font_size": 12.0,
+        "ratio": 18.0
+      }
+    },
+    {
+      "rule": "spacing-inconsistent-h",
+      "element_id": "rollout_manager",
+      "message": "Row at y≈466: horizontal gaps vary (gaps=['33', '830'], mean=432, cv=0.92). Use uniform spacing.",
+      "detail": {
+        "row_y": 466,
+        "gaps": [
+          33.0,
+          830.0
+        ],
+        "mean": 431.5,
+        "cv": 0.92,
+        "element_ids": [
+          "rollout_manager",
+          "rollout_trace",
+          "evaluation"
+        ]
+      }
+    },
+    {
+      "rule": "spacing-inconsistent-h",
+      "element_id": "choice_a",
+      "message": "Row at y≈488: horizontal gaps vary (gaps=['12', '12', '12', '476', '75', '70'], mean=110, cv=1.52). Use uniform spacing.",
+      "detail": {
+        "row_y": 488,
+        "gaps": [
+          12.0,
+          12.0,
+          12.0,
+          476.0,
+          75.0,
+          70.0
+        ],
+        "mean": 109.5,
+        "cv": 1.52,
+        "element_ids": [
+          "choice_a",
+          "choice_b",
+          "choice_c",
+          "choice_d",
+          "act_extractor",
+          "sig_extractor",
+          "reward_final"
+        ]
+      }
+    },
+    {
+      "rule": "spacing-inconsistent-v",
+      "element_id": "frozen_extractor",
+      "message": "Column at x≈1245: vertical gaps vary (gaps=['9', '9', '240', '6', '6', '6', '25'], mean=43, cv=1.88). Use uniform spacing.",
+      "detail": {
+        "col_x": 1245,
+        "gaps": [
+          9.0,
+          9.0,
+          240.0,
+          6.0,
+          6.0,
+          6.0,
+          25.0
+        ],
+        "mean": 43.0,
+        "cv": 1.88,
+        "element_ids": [
+          "frozen_extractor",
+          "frozen_reasoner",
+          "frozen_verifier",
+          "reward_final",
+          "reward_drafts",
+          "reward_missing",
+          "reward_cost",
+          "manager_grpo"
+        ]
+      }
+    },
+    {
+      "rule": "decoration-block-cluster",
+      "element_id": "choice_a",
+      "message": "Cluster of 4 adjacent colored shapes (ids: ['choice_a', 'choice_b', 'choice_c', 'choice_d'], colors: ['#d6e1f5', '#fce1d6'], labels: ['A', 'B', 'C', 'D']). These look like decorative token/matrix cells copied from a reference without semantic content. Either add meaningful text labels (not just '1 2 3 4') stating what each cell represents, or delete the cluster and replace with a single labeled box. Paper figures use colored cells to represent REAL data (tokens, matrix entries) — empty or trivially labeled cells are noise.",
+      "detail": {
+        "cluster_size": 4,
+        "element_ids": [
+          "choice_a",
+          "choice_b",
+          "choice_c",
+          "choice_d"
+        ],
+        "fill_colors": [
+          "#d6e1f5",
+          "#fce1d6"
+        ],
+        "labels": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "rects": [
+          "88,488 30×28",
+          "130,488 30×28",
+          "172,488 30×28",
+          "214,488 30×28"
+        ]
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "choice_a",
+      "message": "Isolated colored shape 'choice_a' (30x28, fill=#d6e1f5, label='A') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "choice_a",
+        "fill_color": "#d6e1f5",
+        "label": "A",
+        "size": "30x28"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "choice_b",
+      "message": "Isolated colored shape 'choice_b' (30x28, fill=#d6e1f5, label='B') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "choice_b",
+        "fill_color": "#d6e1f5",
+        "label": "B",
+        "size": "30x28"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "choice_c",
+      "message": "Isolated colored shape 'choice_c' (30x28, fill=#d6e1f5, label='C') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "choice_c",
+        "fill_color": "#d6e1f5",
+        "label": "C",
+        "size": "30x28"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "choice_d",
+      "message": "Isolated colored shape 'choice_d' (30x28, fill=#fce1d6, label='D') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "choice_d",
+        "fill_color": "#fce1d6",
+        "label": "D",
+        "size": "30x28"
+      }
+    },
+    {
+      "rule": "orphan-empty-box",
+      "element_id": "stage1",
+      "message": "Box 'stage1' (1350×310) has no text label. Add content or reduce size.",
+      "detail": {
+        "box_id": "stage1",
+        "size": "1350×310"
+      }
+    },
+    {
+      "rule": "orphan-empty-box",
+      "element_id": "stage2",
+      "message": "Box 'stage2' (1350×310) has no text label. Add content or reduce size.",
+      "detail": {
+        "box_id": "stage2",
+        "size": "1350×310"
+      }
+    },
+    {
+      "rule": "edge-density-hotspot",
+      "element_id": "*",
+      "message": "Cell (200,600) has 8 edge segments — potential arrow spaghetti. Reroute connectors or add explicit waypoints.",
+      "detail": {
+        "cell_x": 200,
+        "cell_y": 600,
+        "edge_count": 8
+      }
+    }
+  ],
+  "vertex_count": 48,
+  "edge_count": 18,
+  "canvas": "1718x744"
+}
