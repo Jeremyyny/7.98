@@ -692,17 +692,15 @@ class ManagerSFTConfig:
     bf16: bool = True
 
 
-def _render_chat(tokenizer, messages, add_generation_prompt: bool, tools=None) -> str:
-    extra = {"tools": tools} if tools else {}
+def _render_chat(tokenizer, messages, add_generation_prompt: bool) -> str:
     try:
         return tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=add_generation_prompt,
-            enable_thinking=False, **extra,
+            enable_thinking=False,
         )
     except TypeError:
         return tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=add_generation_prompt,
-            **extra,
         )
 
 
@@ -718,7 +716,7 @@ def _mask_prefix_len(prompt_ids: List[int], full_ids: List[int]) -> int:
     return i
 
 
-def _tokenize_manager_sft(rows: List[Dict[str, Any]], tok, max_seq_len: int, tools=None) -> Dataset:
+def _tokenize_manager_sft(rows: List[Dict[str, Any]], tok, max_seq_len: int) -> Dataset:
     eos = tok.eos_token or ""
 
     def _map(ex: Dict[str, Any]) -> Dict[str, Any]:
@@ -729,8 +727,8 @@ def _tokenize_manager_sft(rows: List[Dict[str, Any]], tok, max_seq_len: int, too
         elif isinstance(response_msgs, str):
             response_msgs = [{"role": "assistant", "content": response_msgs}]
 
-        prompt_text = _render_chat(tok, prompt_msgs, add_generation_prompt=True, tools=tools)
-        full_text = _render_chat(tok, prompt_msgs + response_msgs, add_generation_prompt=False, tools=tools)
+        prompt_text = _render_chat(tok, prompt_msgs, add_generation_prompt=True)
+        full_text = _render_chat(tok, prompt_msgs + response_msgs, add_generation_prompt=False)
         if eos and not full_text.rstrip().endswith(eos):
             full_text = full_text + eos
 
@@ -815,10 +813,7 @@ def train_manager_sft(cfg: ManagerSFTConfig) -> None:
     if not rows:
         raise ValueError(f"No rows in {cfg.train_jsonl}")
     print(f"[MANAGER_SFT] tokenizing {len(rows)} rows ...")
-    from src.manager.marginal_value import _tool_schemas
-    manager_tools = _tool_schemas("environment")
-    print(f"[MANAGER_SFT] rendering with {len(manager_tools)} tool schemas")
-    train_ds = _tokenize_manager_sft(rows, tok, cfg.max_seq_len, tools=manager_tools)
+    train_ds = _tokenize_manager_sft(rows, tok, cfg.max_seq_len)
     total_steps = (len(train_ds) // (cfg.per_device_batch_size * cfg.gradient_accumulation_steps)) * cfg.num_train_epochs
     if cfg.max_steps > 0:
         total_steps = min(total_steps, cfg.max_steps)

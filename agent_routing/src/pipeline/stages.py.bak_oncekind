@@ -1621,7 +1621,6 @@ def run_eval_manager_tools(
         ]
         trajectory: List[Dict[str, Any]] = []
         used_tools: List[str] = []
-        used_kinds = set()
         final_text = ""
 
         for step in range(max(1, max_tool_calls + 1)):
@@ -1671,12 +1670,6 @@ def run_eval_manager_tools(
 
                 tool_kind = tool_name[:-5] if tool_name.endswith("_tool") else tool_name
                 candidate = str(args.get("current_draft") or "") if tool_kind == "verifier" else ""
-                if tool_kind in used_kinds:
-                    tool_output = '{"error": "tool_already_called", "detail": "each tool may be used at most once"}'
-                    executed.append((call_id, tool_name, tool_output))
-                    trajectory.append({"role": "assistant", "content": content[:1000], "tool_call": {"name": tool_name, "arguments": args}})
-                    continue
-                used_kinds.add(tool_kind)
                 try:
                     tool_output = pool.call(
                         agent_kind=tool_kind,

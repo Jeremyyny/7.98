@@ -1,0 +1,9 @@
+agent_routing/outputs/adapters
+agent_routing/outputs/manager/*/grpo_*/
+agent_routing/outputs/manager/*/sft_*/
+agent_routing/outputs/manager/*/global_step*/
+agent_routing/src/subagents/prompts/reasoner.py
+agent_routing/src/subagents/prompts/runtime_prompts.py
+*.bak
+*.bak_*
+.DS_Store
