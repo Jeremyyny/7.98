@@ -675,6 +675,11 @@ def run_train_manager_grpo(
     subagent_server_url: Optional[str] = None,
     exploration_hint: str = "",
     clip_epsilon_high: float = 0.0,
+    sft_anchor_jsonl: Optional[str] = None,
+    sft_anchor_coef: float = 0.0,
+    sft_anchor_mode: str = "full",
+    sft_anchor_batch_size: int = 1,
+    sft_anchor_max_seq_len: int = 4096,
 ) -> Dict[str, Any]:
     from ..manager.grpo_train import ManagerGRPOConfig, train_manager_grpo
 
@@ -718,9 +723,19 @@ def run_train_manager_grpo(
         subagent_server_url=subagent_server_url,
         exploration_hint=exploration_hint,
         clip_epsilon_high=clip_epsilon_high,
+        sft_anchor_jsonl=sft_anchor_jsonl,
+        sft_anchor_coef=sft_anchor_coef,
+        sft_anchor_mode=sft_anchor_mode,
+        sft_anchor_batch_size=sft_anchor_batch_size,
+        sft_anchor_max_seq_len=sft_anchor_max_seq_len,
     )
     train_manager_grpo(cfg)
-    return {"manager_dir": out_dir, "fail_buffer": os.path.join(out_dir, "fail_buffer.jsonl")}
+    return {
+        "manager_dir": out_dir,
+        "fail_buffer": os.path.join(out_dir, "fail_buffer.jsonl"),
+        "sft_anchor_mode": sft_anchor_mode if sft_anchor_coef > 0 else "off",
+        "sft_anchor_coef": sft_anchor_coef,
+    }
 
 
 # ---------------- Stage: counterfactual marginal-value SFT ----------------

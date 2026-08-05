@@ -232,6 +232,20 @@ def _parse_args() -> argparse.Namespace:
                         help="DAPO Clip-Higher: upper bound for importance-sampling ratio clip. "
                              "0 = standard symmetric clipping (epsilon=0.2 both sides). "
                              "Recommended: 0.28 (DAPO paper default).")
+    parser.add_argument("--mgr_sft_anchor_jsonl", type=str, default="",
+                        help="Marginal manager-SFT JSONL replayed as an auxiliary loss during GRPO. "
+                             "This does not modify the task reward.")
+    parser.add_argument("--mgr_sft_anchor_coef", type=float, default=0.0,
+                        help="Weight lambda for the auxiliary SFT anchor loss. 0 disables anchoring.")
+    parser.add_argument("--mgr_sft_anchor_mode", type=str, default="full",
+                        choices=["full", "route_only"],
+                        help="full: replay the complete assistant SFT turn; route_only: mask the "
+                             "prompt and DRAFT_ANSWER_* and supervise only the post-draft "
+                             "CALL/COMMIT realization.")
+    parser.add_argument("--mgr_sft_anchor_batch_size", type=int, default=1,
+                        help="Per-process auxiliary SFT replay batch size (default 1).")
+    parser.add_argument("--mgr_sft_anchor_max_seq_len", type=int, default=4096,
+                        help="Maximum sequence length for auxiliary SFT replay examples.")
     parser.add_argument("--exclude_sft_example_ids", action="append", default=[],
                         help="JSONL path(s), comma-separated or repeated, whose example_id values are excluded from manager GRPO train rows.")
 
@@ -651,6 +665,11 @@ def main() -> None:
             subagent_server_url=(args.subagent_server_url or None),
             exploration_hint=args.mgr_exploration_hint,
             clip_epsilon_high=args.mgr_clip_epsilon_high,
+            sft_anchor_jsonl=(args.mgr_sft_anchor_jsonl or None),
+            sft_anchor_coef=args.mgr_sft_anchor_coef,
+            sft_anchor_mode=args.mgr_sft_anchor_mode,
+            sft_anchor_batch_size=args.mgr_sft_anchor_batch_size,
+            sft_anchor_max_seq_len=args.mgr_sft_anchor_max_seq_len,
         )
         print("[TRAIN_MGR_GRPO]", result)
         return
@@ -785,6 +804,11 @@ def main() -> None:
             task_description=args.task_description,
             exploration_hint=args.mgr_exploration_hint,
             clip_epsilon_high=args.mgr_clip_epsilon_high,
+            sft_anchor_jsonl=(args.mgr_sft_anchor_jsonl or None),
+            sft_anchor_coef=args.mgr_sft_anchor_coef,
+            sft_anchor_mode=args.mgr_sft_anchor_mode,
+            sft_anchor_batch_size=args.mgr_sft_anchor_batch_size,
+            sft_anchor_max_seq_len=args.mgr_sft_anchor_max_seq_len,
         )
         evolve_kwargs = dict(
             teacher_provider=(args.teacher_provider or None),
