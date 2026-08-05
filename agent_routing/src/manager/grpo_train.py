@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from datasets import Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForSeq2Seq
 
 try:
     from peft import PeftModel
@@ -44,10 +45,11 @@ except Exception:
 
 from ..benchmarks.base import StandardRow, question_hash as _question_hash
 from ..subagents.runtime import FrozenSubagent, RemoteSubagentPool, SubagentPool
-from ..utils.io import write_json
+from ..utils.io import read_jsonl, write_json
 from ..utils.seed import set_seed
 from .prompt import build_manager_system_prompt, build_manager_user_message
 from .reward import build_reward_funcs
+from .routing_anchor import ANCHOR_MODES, build_anchor_features
 
 
 def _grpo_supports_environment_factory() -> bool:
@@ -244,6 +246,12 @@ class ManagerGRPOConfig:
     task_description: str = ""           # optional, passed into manager system prompt
     exploration_hint: str = ""           # START-style hint injected into system prompt during training only
     clip_epsilon_high: float = 0.0       # DAPO Clip-Higher: asymmetric clip upper bound (0 = symmetric/standard)
+    # Optional SFT replay anchor. This is an auxiliary supervised loss, not reward shaping.
+    sft_anchor_jsonl: Optional[str] = None
+    sft_anchor_coef: float = 0.0
+    sft_anchor_mode: str = "full"         # full | route_only
+    sft_anchor_batch_size: int = 1
+    sft_anchor_max_seq_len: int = 4096
     # Adaptive Deliberation Control reward (replaces CCR)
     adc_mode: bool = False               # legacy ADC reward ablation; main method uses binary reward
     adc_cost_per_tool: float = 0.05      # per-tool cost (discourages over-calling without utility)
@@ -251,6 +259,145 @@ class ManagerGRPOConfig:
     adc_missing_draft_penalty: float = 0.1  # penalty per tool call without an accompanying draft
     adc_final_bonus: float = 1.0         # bonus for final correct answer
     adc_variant: str = "anytime"         # anytime | transition | sum (latter two: ablation arms only)
+
+
+_GRPOTrainerBase = GRPOTrainer if TRL_AVAILABLE else object
+
+
+class SFTAnchoredGRPOTrainer(_GRPOTrainerBase):
+    """GRPO plus a replayed marginal-SFT loss on every optimization step.
+
+    ``anchor_mode=full`` replays the complete assistant target.  In
+    ``route_only`` mode the tokenization masks the prompt and current draft,
+    leaving only the post-draft CALL/COMMIT realization supervised.
+
+    Each distributed worker shuffles the replay data with a rank-specific
+    seed, while Trainer's normal input preparation moves the auxiliary batch
+    to the right device.  The auxiliary forward pass is part of the same loss
+    returned to Trainer, so gradient accumulation and DeepSpeed scaling remain
+    owned by the normal Trainer/Accelerate path.
+    """
+
+    def __init__(
+        self,
+        *args,
+        sft_anchor_dataset=None,
+        sft_anchor_collator=None,
+        sft_anchor_coef: float = 0.0,
+        sft_anchor_batch_size: int = 1,
+        sft_anchor_seed: int = 42,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.sft_anchor_coef = float(sft_anchor_coef)
+        self._sft_anchor_loader = None
+        self._sft_anchor_iter = None
+        self._sft_anchor_loss_sum = 0.0
+        self._sft_anchor_loss_count = 0
+
+        if self.sft_anchor_coef <= 0.0:
+            return
+        if sft_anchor_dataset is None or len(sft_anchor_dataset) == 0:
+            raise ValueError("sft_anchor_coef > 0 requires a non-empty SFT anchor dataset")
+        if sft_anchor_collator is None:
+            raise ValueError("sft_anchor_coef > 0 requires an SFT anchor collator")
+        if int(sft_anchor_batch_size) <= 0:
+            raise ValueError("sft_anchor_batch_size must be positive")
+
+        generator = torch.Generator()
+        rank = int(getattr(self.accelerator, "process_index", 0))
+        generator.manual_seed(int(sft_anchor_seed) + rank)
+        self._sft_anchor_loader = DataLoader(
+            sft_anchor_dataset,
+            batch_size=int(sft_anchor_batch_size),
+            shuffle=True,
+            collate_fn=sft_anchor_collator,
+            generator=generator,
+            drop_last=False,
+        )
+        self._sft_anchor_iter = iter(self._sft_anchor_loader)
+
+    def _next_sft_anchor_batch(self):
+        if self._sft_anchor_loader is None:
+            return None
+        try:
+            return next(self._sft_anchor_iter)
+        except StopIteration:
+            self._sft_anchor_iter = iter(self._sft_anchor_loader)
+            return next(self._sft_anchor_iter)
+
+    def _call_base_compute_loss(
+        self,
+        model,
+        inputs,
+        return_outputs: bool = False,
+        num_items_in_batch=None,
+    ):
+        """Forward only kwargs supported by the installed TRL version."""
+        base_compute_loss = super().compute_loss
+        params = inspect.signature(base_compute_loss).parameters
+        kwargs: Dict[str, Any] = {}
+        if "return_outputs" in params:
+            kwargs["return_outputs"] = return_outputs
+        if "num_items_in_batch" in params:
+            kwargs["num_items_in_batch"] = num_items_in_batch
+        return base_compute_loss(model, inputs, **kwargs)
+
+    def compute_loss(
+        self,
+        model,
+        inputs,
+        return_outputs: bool = False,
+        num_items_in_batch=None,
+    ):
+        grpo_loss = self._call_base_compute_loss(
+            model,
+            inputs,
+            return_outputs=return_outputs,
+            num_items_in_batch=num_items_in_batch,
+        )
+        if return_outputs or not model.training or self.sft_anchor_coef <= 0.0:
+            return grpo_loss
+
+        anchor_batch = self._next_sft_anchor_batch()
+        if anchor_batch is None:
+            return grpo_loss
+        # Keep model/device placement in Trainer rather than manually calling
+        # .cuda(), which also works when the model is managed by DeepSpeed.
+        anchor_batch = self._prepare_inputs(anchor_batch)
+        anchor_outputs = model(
+            input_ids=anchor_batch["input_ids"],
+            attention_mask=anchor_batch.get("attention_mask"),
+            labels=anchor_batch["labels"],
+            use_cache=False,
+        )
+        anchor_loss = anchor_outputs.loss
+        if anchor_loss is None or not torch.isfinite(anchor_loss.detach()).all():
+            raise RuntimeError(f"Non-finite SFT anchor loss: {anchor_loss}")
+
+        # Gather only the detached scalar for logging. The differentiable loss
+        # stays local and is combined with GRPO below.
+        logged_loss = anchor_loss.detach().float().reshape(1)
+        try:
+            logged_loss = self.accelerator.gather(logged_loss).mean()
+        except Exception:
+            logged_loss = logged_loss.mean()
+        self._sft_anchor_loss_sum += float(logged_loss.item())
+        self._sft_anchor_loss_count += 1
+        return grpo_loss + (self.sft_anchor_coef * anchor_loss)
+
+    def log(self, logs, *args, **kwargs):
+        if self._sft_anchor_loss_count:
+            logs = dict(logs)
+            logs["sft_anchor/loss"] = (
+                self._sft_anchor_loss_sum / self._sft_anchor_loss_count
+            )
+            logs["sft_anchor/weighted_loss"] = (
+                logs["sft_anchor/loss"] * self.sft_anchor_coef
+            )
+            self._sft_anchor_loss_sum = 0.0
+            self._sft_anchor_loss_count = 0
+        return super().log(logs, *args, **kwargs)
 
 
 def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
@@ -420,6 +567,63 @@ def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
     if not hasattr(manager_model, "warnings_issued") or manager_model.warnings_issued is None:
         manager_model.warnings_issued = {}
 
+    # ---- Optional marginal-SFT replay anchor ----
+    sft_anchor_dataset = None
+    sft_anchor_collator = None
+    sft_anchor_stats: Dict[str, float] = {}
+    if cfg.sft_anchor_coef < 0:
+        raise ValueError("sft_anchor_coef must be >= 0")
+    if cfg.sft_anchor_coef > 0:
+        if not cfg.sft_anchor_jsonl:
+            raise ValueError("sft_anchor_coef > 0 requires --mgr_sft_anchor_jsonl")
+        if not os.path.exists(cfg.sft_anchor_jsonl):
+            raise FileNotFoundError(f"SFT anchor JSONL not found: {cfg.sft_anchor_jsonl}")
+        if cfg.sft_anchor_mode not in ANCHOR_MODES:
+            raise ValueError(
+                f"Unknown sft_anchor_mode={cfg.sft_anchor_mode!r}; "
+                f"expected one of {ANCHOR_MODES}"
+            )
+        if cfg.sft_anchor_batch_size <= 0:
+            raise ValueError("sft_anchor_batch_size must be positive")
+        if cfg.sft_anchor_max_seq_len <= 0:
+            raise ValueError("sft_anchor_max_seq_len must be positive")
+
+        anchor_rows = read_jsonl(cfg.sft_anchor_jsonl)
+        if not anchor_rows:
+            raise ValueError(f"No rows in SFT anchor JSONL: {cfg.sft_anchor_jsonl}")
+        # Render the replay targets with the same native tool schema used by
+        # this GRPO run.  The anchor never changes the reward function.
+        from .marginal_value import _tool_schemas
+
+        anchor_tools = _tool_schemas(binding_mode)
+        anchor_features, sft_anchor_stats = build_anchor_features(
+            rows=anchor_rows,
+            tokenizer=manager_tok,
+            max_seq_len=int(cfg.sft_anchor_max_seq_len),
+            mode=cfg.sft_anchor_mode,
+            tools=anchor_tools,
+        )
+        if not anchor_features:
+            raise ValueError(
+                "SFT anchor tokenization produced no supervised targets. "
+                "Increase --mgr_sft_anchor_max_seq_len or inspect the chat template."
+            )
+        sft_anchor_dataset = Dataset.from_list(anchor_features)
+        sft_anchor_collator = DataCollatorForSeq2Seq(
+            manager_tok,
+            padding=True,
+            label_pad_token_id=-100,
+            return_tensors="pt",
+        )
+        print(
+            "[MANAGER_GRPO/SFT_ANCHOR] "
+            f"mode={cfg.sft_anchor_mode} coef={cfg.sft_anchor_coef} "
+            f"rows={int(sft_anchor_stats['n_rows'])} "
+            f"kept={int(sft_anchor_stats['n_kept'])} "
+            f"dropped={int(sft_anchor_stats['n_dropped_no_target'])} "
+            f"mean_supervised_tokens={sft_anchor_stats['mean_supervised_tokens']:.1f}"
+        )
+
     # ---- GRPO config ----
     _grpo_extra: Dict[str, Any] = {}
     if cfg.clip_epsilon_high > 0:
@@ -491,8 +695,19 @@ def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
             f"tool_use_bonus={cfg.tool_use_bonus}"
         )
 
+    trainer_cls = SFTAnchoredGRPOTrainer if cfg.sft_anchor_coef > 0 else GRPOTrainer
+    anchor_trainer_kwargs: Dict[str, Any] = {}
+    if cfg.sft_anchor_coef > 0:
+        anchor_trainer_kwargs = {
+            "sft_anchor_dataset": sft_anchor_dataset,
+            "sft_anchor_collator": sft_anchor_collator,
+            "sft_anchor_coef": cfg.sft_anchor_coef,
+            "sft_anchor_batch_size": cfg.sft_anchor_batch_size,
+            "sft_anchor_seed": cfg.seed + 1701,
+        }
+
     if binding_mode == "environment":
-        trainer = GRPOTrainer(
+        trainer = trainer_cls(
             model=manager_model,
             args=grpo_args,
             train_dataset=train_dataset,
@@ -500,9 +715,10 @@ def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
             reward_funcs=reward_funcs,
             rollout_func=None,
             environment_factory=ManagerToolEnvironment,
+            **anchor_trainer_kwargs,
         )
     else:
-        trainer = GRPOTrainer(
+        trainer = trainer_cls(
             model=manager_model,
             args=grpo_args,
             train_dataset=train_dataset,
@@ -510,6 +726,7 @@ def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
             reward_funcs=reward_funcs,
             rollout_func=None,
             tools=[extractor_tool, reasoner_tool, verifier_tool],
+            **anchor_trainer_kwargs,
         )
 
     trainer.train()
@@ -541,5 +758,11 @@ def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
         "adc_missing_draft_penalty": float(cfg.adc_missing_draft_penalty),
         "adc_final_bonus": float(cfg.adc_final_bonus),
         "adc_variant": str(cfg.adc_variant),
+        "sft_anchor_jsonl": cfg.sft_anchor_jsonl or "",
+        "sft_anchor_coef": float(cfg.sft_anchor_coef),
+        "sft_anchor_mode": str(cfg.sft_anchor_mode),
+        "sft_anchor_batch_size": int(cfg.sft_anchor_batch_size),
+        "sft_anchor_max_seq_len": int(cfg.sft_anchor_max_seq_len),
+        "sft_anchor_stats": sft_anchor_stats,
     })
     print(f"[MANAGER_GRPO] saved -> {cfg.out_dir}")
