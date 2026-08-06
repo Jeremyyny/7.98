@@ -692,7 +692,27 @@ class ManagerSFTConfig:
     bf16: bool = True
 
 
+def _normalize_tool_calls(messages):
+    import json as _json, copy
+    out = copy.deepcopy(messages)
+    for m in out:
+        for tc in (m.get("tool_calls") or []):
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+            a = fn.get("arguments")
+            if isinstance(a, str):
+                try:
+                    fn["arguments"] = _json.loads(a)
+                except Exception:
+                    fn["arguments"] = {"input": a}
+            if fn is not tc:
+                tc.setdefault("name", fn.get("name"))
+                tc["arguments"] = fn["arguments"]
+    return out
+
+
+
 def _render_chat(tokenizer, messages, add_generation_prompt: bool, tools=None) -> str:
+    messages = _normalize_tool_calls(messages)
     extra = {"tools": tools} if tools else {}
     try:
         return tokenizer.apply_chat_template(
