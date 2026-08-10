@@ -9,3 +9,8 @@ __pycache__/
 .env.*
 *.log
 .DS_Store
+outputs/
+logs/
+wandb/
+.venv/
+*.bak_*

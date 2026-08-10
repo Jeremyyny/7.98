@@ -848,6 +848,8 @@ def train_manager_sft(cfg: ManagerSFTConfig) -> None:
     args = TrainingArguments(
         output_dir=cfg.out_dir,
         per_device_train_batch_size=cfg.per_device_batch_size,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         per_device_eval_batch_size=cfg.per_device_batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         learning_rate=cfg.learning_rate,

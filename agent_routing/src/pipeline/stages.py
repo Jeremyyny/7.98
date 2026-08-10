@@ -1451,19 +1451,38 @@ def _manager_tool_schemas(binding_mode: str) -> List[Dict[str, Any]]:
     ]
 
 
-_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL | re.IGNORECASE)
+_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL | re.IGNORECASE)
+
+
+_QWEN35_FUNC_RE = re.compile(r"<function=([A-Za-z0-9_]+)\s*>", re.S)
+_QWEN35_PARAM_RE = re.compile(r"<parameter=([A-Za-z0-9_]+)\s*>\s*(.*?)\s*</parameter>", re.S)
 
 
 def _extract_manager_tool_calls(text: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """Parse Qwen-style XML tool calls emitted by the chat template."""
+    """Parse XML tool calls emitted by the chat template.
+
+    Handles the Qwen3 JSON payload form:
+        <tool_call>{"name": ..., "arguments": {...}}</tool_call>
+    and the Qwen3.5 nested-XML form:
+        <tool_call><function=NAME><parameter=KEY>VAL</parameter></function></tool_call>
+    """
     calls: List[Dict[str, Any]] = []
     for m in _TOOL_CALL_RE.finditer(text or ""):
+        blob = m.group(1)
+        name = ""
+        args: Any = {}
         try:
-            obj = json.loads(m.group(1))
+            obj = json.loads(blob)
+            name = str(obj.get("name") or "").strip()
+            args = obj.get("arguments") or {}
         except Exception:
-            continue
-        name = str(obj.get("name") or "").strip()
-        args = obj.get("arguments") or {}
+            fm = _QWEN35_FUNC_RE.search(blob or "")
+            if fm:
+                name = fm.group(1).strip()
+                args = {}
+                for k, v in _QWEN35_PARAM_RE.findall(blob or ""):
+                    v = v.strip()
+                    args[k] = int(v) if v.lstrip("-").isdigit() else v
         if isinstance(args, str):
             try:
                 args = json.loads(args)
@@ -1521,8 +1540,33 @@ def _load_manager_for_eval(ctx: StageContext, manager_dir: str, device: str, dty
     return tok, model
 
 
+def _normalize_tool_calls_for_template(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Qwen3.5's chat template iterates tool_call.arguments with |items, so the
+    arguments must be a mapping. The vLLM API needs them as a JSON string, so we
+    convert on a deep copy and leave the caller's messages untouched."""
+    import copy
+    out = copy.deepcopy(messages)
+    for m in out:
+        for tc in (m.get("tool_calls") or []):
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+            a = fn.get("arguments")
+            if isinstance(a, str):
+                try:
+                    fn["arguments"] = json.loads(a)
+                except Exception:
+                    fn["arguments"] = {}
+            if not isinstance(fn.get("arguments"), dict):
+                fn["arguments"] = {}
+            if fn is not tc:
+                tc.setdefault("name", fn.get("name"))
+                tc["arguments"] = fn["arguments"]
+    return out
+
+
+
 def _render_manager_chat(tok: Any, messages: List[Dict[str, Any]],
                          tools: List[Dict[str, Any]]) -> str:
+    messages = _normalize_tool_calls_for_template(messages)
     try:
         return tok.apply_chat_template(
             messages,
