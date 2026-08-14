@@ -692,7 +692,27 @@ class ManagerSFTConfig:
     bf16: bool = True
 
 
+def _normalize_tool_calls(messages):
+    import json as _json, copy
+    out = copy.deepcopy(messages)
+    for m in out:
+        for tc in (m.get("tool_calls") or []):
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+            a = fn.get("arguments")
+            if isinstance(a, str):
+                try:
+                    fn["arguments"] = _json.loads(a)
+                except Exception:
+                    fn["arguments"] = {"input": a}
+            if fn is not tc:
+                tc.setdefault("name", fn.get("name"))
+                tc["arguments"] = fn["arguments"]
+    return out
+
+
+
 def _render_chat(tokenizer, messages, add_generation_prompt: bool, tools=None) -> str:
+    messages = _normalize_tool_calls(messages)
     extra = {"tools": tools} if tools else {}
     try:
         return tokenizer.apply_chat_template(
@@ -828,6 +848,8 @@ def train_manager_sft(cfg: ManagerSFTConfig) -> None:
     args = TrainingArguments(
         output_dir=cfg.out_dir,
         per_device_train_batch_size=cfg.per_device_batch_size,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         per_device_eval_batch_size=cfg.per_device_batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         learning_rate=cfg.learning_rate,

@@ -364,7 +364,7 @@ class SFTAnchoredGRPOTrainer(_GRPOTrainerBase):
             return grpo_loss
         # Keep model/device placement in Trainer rather than manually calling
         # .cuda(), which also works when the model is managed by DeepSpeed.
-        anchor_batch = self._prepare_inputs(anchor_batch)
+        anchor_batch = {k: (v.to(self.args.device) if hasattr(v, "to") else v) for k, v in anchor_batch.items()}
         anchor_outputs = model(
             input_ids=anchor_batch["input_ids"],
             attention_mask=anchor_batch.get("attention_mask"),
@@ -645,6 +645,9 @@ def train_manager_grpo(cfg: ManagerGRPOConfig) -> None:
         per_device_train_batch_size=int(cfg.per_device_train_batch_size),
         max_tool_calling_iterations=3,           # we allow up to 3 tools
         chat_template_kwargs={"enable_thinking": False},
+        gradient_accumulation_steps=2,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=1,
         log_completions=True,
         num_completions_to_print=None,

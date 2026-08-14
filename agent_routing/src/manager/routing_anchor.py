@@ -249,3 +249,36 @@ def build_anchor_features(
         "mean_tokens": total_tokens / max(1, len(rows)),
         "mean_supervised_tokens": total_supervised / max(1, n_kept),
     }
+
+
+# --- Qwen3.5 tool_call arguments normalization (appended patch) ---
+import json as _json_qwen35
+
+
+def _normalize_messages_qwen35(value):
+    if not (isinstance(value, list) and value and isinstance(value[0], dict)):
+        return value
+    normalized = []
+    for message in value:
+        new_message = dict(message)
+        calls = message.get("tool_calls")
+        new_calls = []
+        for call in calls or []:
+            new_call = dict(call)
+            function = dict(new_call.get("function", {}))
+            arguments = function.get("arguments")
+            function["arguments"] = _json_qwen35.loads(arguments or "{}") if isinstance(arguments, str) else arguments
+            new_call["function"] = function
+            new_calls.append(new_call)
+        new_message["tool_calls"] = new_calls if calls else calls
+        normalized.append(new_message)
+    return normalized
+
+
+_render_chat_pre_qwen35 = _render_chat
+
+
+def _render_chat(*args, **kwargs):
+    args = tuple(_normalize_messages_qwen35(a) for a in args)
+    kwargs = {k: _normalize_messages_qwen35(v) for k, v in kwargs.items()}
+    return _render_chat_pre_qwen35(*args, **kwargs)

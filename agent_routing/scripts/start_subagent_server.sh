@@ -50,5 +50,5 @@ CUDA_VISIBLE_DEVICES=0 python -m vllm.entrypoints.openai.api_server \
     --port "${PORT}" \
     --dtype bfloat16 \
     --trust-remote-code \
-    --max-model-len 4096 \
+    --max-model-len 16384 \
     --override-generation-config '{"enable_thinking": false}'
