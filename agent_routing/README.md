@@ -17,11 +17,13 @@ the explicit draft to compare `COMMIT` with forced advisor branches and
 imitates a shortest trajectory only when it actually reaches the correct
 answer.
 
-Benchmarks: **MedQA-USMLE**, **LegalBench**, **MMLU-Pro**, **GPQA**.
+Benchmarks: **MedQA-USMLE**, **LegalBench**, **MMLU-Pro**, **GPQA**,
+**AQuA-RAT**, and **ARC-Challenge**.
 
 > Current step-by-step protocol: **[MARGINAL_VALUE_EXPERIMENTS.md](MARGINAL_VALUE_EXPERIMENTS.md)**.
 > The older ADC experiment matrix is retained in `EXPERIMENTS.md` for history.
 > This README covers the system + one end-to-end walkthrough per benchmark.
+> AQuA-RAT and ARC-Challenge commands: **[AQUA_ARC_BENCHMARKS.md](AQUA_ARC_BENCHMARKS.md)**.
 
 ---
 
@@ -272,13 +274,21 @@ Then run the same seven steps as MedQA with
 --mgr_grpo_beta 0.02`, and evaluate ONLY on `gpqa_diamond_eval100.jsonl`.
 Full copy-paste commands: EXPERIMENTS.md §8.4.
 
+## 5. AQuA-RAT and ARC-Challenge
+
+Both benchmarks preserve their official splits and use the common
+`StandardRow` pipeline. AQuA gold rationales are excluded from runtime caches;
+ARC source choice labels are explicitly mapped to canonical answer keys.
+Complete data, advisor-SFT, marginal-SFT, optional anchored-GRPO, and evaluation
+commands are in [AQUA_ARC_BENCHMARKS.md](AQUA_ARC_BENCHMARKS.md).
+
 ---
 
 ## Pipeline stages (reference)
 
 | Stage | What it does |
 |---|---|
-| `load_medqa` / `load_gpqa` / `load_mmlu_pro` | download + normalize (GPQA: `--gpqa_exclude_subsets` for nested-subset dedup) |
+| `load_medqa` / `load_gpqa` / `load_mmlu_pro` / `load_aqua_rat` / `load_arc_challenge` | download + normalize (GPQA: `--gpqa_exclude_subsets` for nested-subset dedup) |
 | `synth_subagent` | teacher synthesis, four quality gates (JSON → schema → coverage → leakage) |
 | `export_deepseek_jsonl` / `import_deepseek_jsonl` | offline-teacher alternative to synth |
 | `train_subagent` | LoRA-SFT one advisor |

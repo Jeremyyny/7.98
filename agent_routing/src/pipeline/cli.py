@@ -38,6 +38,8 @@ def _parse_args() -> argparse.Namespace:
         "load_medqa",
         "load_gpqa",
         "load_mmlu_pro",
+        "load_aqua_rat",
+        "load_arc_challenge",
         "export_legalbench_jsonl",
         "synth_subagent",
         "export_deepseek_jsonl",
@@ -69,6 +71,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--binding_mode", type=str, default="auto",
                         choices=["auto", "environment", "argument"])
+    parser.add_argument(
+        "--benchmark",
+        type=str,
+        default="auto",
+        choices=["auto", "medqa", "legalbench", "gpqa", "mmlu_pro", "aqua_rat", "arc_challenge"],
+        help="Benchmark to load. 'auto' preserves existing cache-flag detection; an explicit value is safer for new runs.",
+    )
 
     # MedQA loading
     parser.add_argument("--medqa_source", type=str, default="hf", choices=["hf", "local"])
@@ -120,6 +129,27 @@ def _parse_args() -> argparse.Namespace:
                         help="Comma-separated HF split names to load.")
     parser.add_argument("--mmlu_pro_normalized_cache", type=str, default="")
     parser.add_argument("--mmlu_pro_refresh_cache", action="store_true")
+
+    # AQuA-RAT loading. Gold rationales are intentionally excluded from the
+    # normalized runtime cache to prevent answer leakage.
+    parser.add_argument("--aqua_rat_source", type=str, default="hf", choices=["hf", "local"])
+    parser.add_argument("--aqua_rat_hf_dataset", type=str, default="deepmind/aqua_rat")
+    parser.add_argument("--aqua_rat_hf_config", type=str, default="raw")
+    parser.add_argument("--aqua_rat_local_path", type=str, default="")
+    parser.add_argument("--aqua_rat_hf_cache", type=str, default="")
+    parser.add_argument("--aqua_rat_max", type=int, default=0)
+    parser.add_argument("--aqua_rat_splits", type=str, default="train,validation,test")
+    parser.add_argument("--aqua_rat_normalized_cache", type=str, default="")
+    parser.add_argument("--aqua_rat_refresh_cache", action="store_true")
+
+    # ARC-Challenge loading
+    parser.add_argument("--arc_challenge_hf_dataset", type=str, default="allenai/ai2_arc")
+    parser.add_argument("--arc_challenge_config", type=str, default="ARC-Challenge")
+    parser.add_argument("--arc_challenge_hf_cache", type=str, default="")
+    parser.add_argument("--arc_challenge_max", type=int, default=0)
+    parser.add_argument("--arc_challenge_splits", type=str, default="train,validation,test")
+    parser.add_argument("--arc_challenge_normalized_cache", type=str, default="")
+    parser.add_argument("--arc_challenge_refresh_cache", action="store_true")
 
     # Split sizes
     parser.add_argument("--train_size", type=int, default=600)
@@ -323,8 +353,7 @@ def _ctx_from(args) -> stages.StageContext:
     )
 
 
-def _load_or_split(args) -> dict:
-    """Load MedQA, split into train/dev/test, also serialize splits to disk."""
+def _load_medqa_or_cache(args) -> List[StandardRow]:
     cache = args.medqa_normalized_cache or os.path.join(
         args.output_root, "data", "medqa_normalized.jsonl"
     )
@@ -338,16 +367,9 @@ def _load_or_split(args) -> dict:
             cache_normalized_path=cache,
         )
     else:
-        from ..benchmarks.base import StandardRow
         rows = [StandardRow(**r) for r in read_jsonl(cache)]
         print(f"[LOAD_MEDQA] loaded cached {len(rows)} rows -> {cache}")
-
-    train, dev, test = stages._split_rows(
-        rows=rows, train_size=args.train_size, dev_size=args.dev_size,
-        test_size=args.test_size, seed=args.seed,
-    )
-    print(f"[SPLIT] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
-    return {"all": rows, "train": train, "dev": dev, "test": test}
+    return rows
 
 
 def _load_legalbench_or_cache(args) -> List[StandardRow]:
@@ -371,13 +393,20 @@ def _load_legalbench_or_cache(args) -> List[StandardRow]:
 
 
 def _using_legalbench(args) -> bool:
-    return bool(args.legalbench_normalized_cache or args.legalbench_configs)
+    return bool(
+        getattr(args, "legalbench_normalized_cache", "")
+        or getattr(args, "legalbench_configs", "")
+        or getattr(args, "legalbench_refresh_cache", False)
+    )
 
 
 def _using_gpqa(args) -> bool:
     # NOTE: --gpqa_subsets has a non-empty default, so only the cache path
     # (or the load_gpqa stage itself) activates the GPQA branch.
-    return bool(getattr(args, "gpqa_normalized_cache", ""))
+    return bool(
+        getattr(args, "gpqa_normalized_cache", "")
+        or getattr(args, "gpqa_refresh_cache", False)
+    )
 
 
 def _using_mmlu_pro(args) -> bool:
@@ -386,6 +415,30 @@ def _using_mmlu_pro(args) -> bool:
         or getattr(args, "mmlu_pro_categories", "") != ""
         # Explicit flag to use MMLU-Pro even with no category filter
         or getattr(args, "use_mmlu_pro", False)
+        or getattr(args, "mmlu_pro_refresh_cache", False)
+    )
+
+
+def _using_medqa(args) -> bool:
+    return bool(
+        getattr(args, "medqa_normalized_cache", "")
+        or getattr(args, "medqa_local_path", "")
+        or getattr(args, "medqa_refresh_cache", False)
+    )
+
+
+def _using_aqua_rat(args) -> bool:
+    return bool(
+        getattr(args, "aqua_rat_normalized_cache", "")
+        or getattr(args, "aqua_rat_local_path", "")
+        or getattr(args, "aqua_rat_refresh_cache", False)
+    )
+
+
+def _using_arc_challenge(args) -> bool:
+    return bool(
+        getattr(args, "arc_challenge_normalized_cache", "")
+        or getattr(args, "arc_challenge_refresh_cache", False)
     )
 
 
@@ -404,7 +457,7 @@ def _load_gpqa_or_cache(args) -> List[StandardRow]:
             exclude_subsets=args.gpqa_exclude_subsets,
         )
     else:
-        rows = [stages.StandardRow(**r) for r in read_jsonl(cache)]
+        rows = [StandardRow(**r) for r in read_jsonl(cache)]
         print(f"[LOAD_GPQA] loaded cached {len(rows)} rows -> {cache}")
     return rows
 
@@ -423,51 +476,118 @@ def _load_mmlu_pro_or_cache(args) -> List[StandardRow]:
             cache_normalized_path=cache,
         )
     else:
-        rows = [stages.StandardRow(**r) for r in read_jsonl(cache)]
+        rows = [StandardRow(**r) for r in read_jsonl(cache)]
         print(f"[LOAD_MMLU_PRO] loaded cached {len(rows)} rows -> {cache}")
     return rows
 
 
+def _load_aqua_rat_or_cache(args) -> List[StandardRow]:
+    cache = args.aqua_rat_normalized_cache or os.path.join(
+        args.output_root, "data", "aqua_rat_normalized.jsonl"
+    )
+    if args.aqua_rat_refresh_cache or not os.path.exists(cache):
+        rows = stages.run_load_aqua_rat(
+            source=args.aqua_rat_source,
+            dataset_name=args.aqua_rat_hf_dataset,
+            config_name=args.aqua_rat_hf_config,
+            local_path=(args.aqua_rat_local_path or None),
+            hf_cache_dir=(args.aqua_rat_hf_cache or None),
+            max_examples=args.aqua_rat_max,
+            splits=args.aqua_rat_splits,
+            cache_normalized_path=cache,
+        )
+    else:
+        rows = [StandardRow(**r) for r in read_jsonl(cache)]
+        print(f"[LOAD_AQUA_RAT] loaded cached {len(rows)} rows -> {cache}")
+    return rows
+
+
+def _load_arc_challenge_or_cache(args) -> List[StandardRow]:
+    cache = args.arc_challenge_normalized_cache or os.path.join(
+        args.output_root, "data", "arc_challenge_normalized.jsonl"
+    )
+    if args.arc_challenge_refresh_cache or not os.path.exists(cache):
+        rows = stages.run_load_arc_challenge(
+            dataset_name=args.arc_challenge_hf_dataset,
+            config_name=args.arc_challenge_config,
+            hf_cache_dir=(args.arc_challenge_hf_cache or None),
+            max_examples=args.arc_challenge_max,
+            splits=args.arc_challenge_splits,
+            cache_normalized_path=cache,
+        )
+    else:
+        rows = [StandardRow(**r) for r in read_jsonl(cache)]
+        print(f"[LOAD_ARC_CHALLENGE] loaded cached {len(rows)} rows -> {cache}")
+    return rows
+
+
+_STAGE_BENCHMARK = {
+    "load_medqa": "medqa",
+    "load_gpqa": "gpqa",
+    "load_mmlu_pro": "mmlu_pro",
+    "load_aqua_rat": "aqua_rat",
+    "load_arc_challenge": "arc_challenge",
+    "export_legalbench_jsonl": "legalbench",
+}
+
+
+def _requested_benchmark(args) -> str:
+    """Resolve one benchmark and reject ambiguous cache/config combinations."""
+    stage_benchmark = _STAGE_BENCHMARK.get(getattr(args, "stage", ""))
+    explicit = getattr(args, "benchmark", "auto")
+    signals = {
+        name
+        for name, active in (
+            ("medqa", _using_medqa(args)),
+            ("legalbench", _using_legalbench(args)),
+            ("gpqa", _using_gpqa(args)),
+            ("mmlu_pro", _using_mmlu_pro(args)),
+            ("aqua_rat", _using_aqua_rat(args)),
+            ("arc_challenge", _using_arc_challenge(args)),
+        )
+        if active
+    }
+    if stage_benchmark:
+        signals.add(stage_benchmark)
+
+    if explicit != "auto":
+        conflicts = sorted(name for name in signals if name != explicit)
+        if conflicts:
+            raise ValueError(
+                f"--benchmark {explicit} conflicts with active benchmark argument(s): "
+                f"{', '.join(conflicts)}. Pass flags for exactly one benchmark."
+            )
+        return explicit
+
+    if len(signals) > 1:
+        raise ValueError(
+            "Multiple benchmarks are active: "
+            f"{', '.join(sorted(signals))}. Set --benchmark and remove unrelated dataset flags."
+        )
+    return next(iter(signals), "medqa")
+
+
 def _load_benchmark_splits(args) -> dict:
-    """Load the requested benchmark and return train/dev/test splits.
-
-    Priority (first active wins): mmlu_pro > gpqa > legalbench > medqa.
-    GPQA and MMLU-Pro have no predefined train/dev/test split, so rows are
-    split deterministically using --train_size / --dev_size / --test_size.
-    """
-    # MMLU-Pro: active when --mmlu_pro_normalized_cache is set OR
-    #           --mmlu_pro_categories is non-empty OR stage == load_mmlu_pro
-    if getattr(args, "stage", "") == "load_mmlu_pro" or _using_mmlu_pro(args):
-        rows = _load_mmlu_pro_or_cache(args)
-        train, dev, test = stages._split_rows(
-            rows=rows, train_size=args.train_size, dev_size=args.dev_size,
-            test_size=args.test_size, seed=args.seed,
-        )
-        print(f"[SPLIT/MMLU_PRO] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
-        return {"all": rows, "train": train, "dev": dev, "test": test}
-
-    # GPQA: active when --gpqa_normalized_cache is set OR stage == load_gpqa
-    if getattr(args, "stage", "") == "load_gpqa" or (
-        _using_gpqa(args) and not _using_legalbench(args)
-    ):
-        rows = _load_gpqa_or_cache(args)
-        train, dev, test = stages._split_rows(
-            rows=rows, train_size=args.train_size, dev_size=args.dev_size,
-            test_size=args.test_size, seed=args.seed,
-        )
-        print(f"[SPLIT/GPQA] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
-        return {"all": rows, "train": train, "dev": dev, "test": test}
-
-    if _using_legalbench(args):
-        rows = _load_legalbench_or_cache(args)
-        train, dev, test = stages._split_rows(
-            rows=rows, train_size=args.train_size, dev_size=args.dev_size,
-            test_size=args.test_size, seed=args.seed,
-        )
-        print(f"[SPLIT/LEGALBENCH] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
-        return {"all": rows, "train": train, "dev": dev, "test": test}
-
-    return _load_or_split(args)
+    """Load exactly one benchmark and return train/dev/test splits."""
+    benchmark = _requested_benchmark(args)
+    loader = {
+        "medqa": _load_medqa_or_cache,
+        "legalbench": _load_legalbench_or_cache,
+        "gpqa": _load_gpqa_or_cache,
+        "mmlu_pro": _load_mmlu_pro_or_cache,
+        "aqua_rat": _load_aqua_rat_or_cache,
+        "arc_challenge": _load_arc_challenge_or_cache,
+    }[benchmark]
+    rows = loader(args)
+    train, dev, test = stages._split_rows(
+        rows=rows,
+        train_size=args.train_size,
+        dev_size=args.dev_size,
+        test_size=args.test_size,
+        seed=args.seed,
+    )
+    print(f"[SPLIT/{benchmark.upper()}] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
+    return {"benchmark": benchmark, "all": rows, "train": train, "dev": dev, "test": test}
 
 
 def _load_eval_rows(args) -> List[StandardRow]:
@@ -516,26 +636,11 @@ def main() -> None:
     args = _parse_args()
     ctx = _ctx_from(args)
 
-    if args.stage == "load_medqa":
-        _load_or_split(args)
-        return
-
-    if args.stage == "load_gpqa":
-        rows = _load_gpqa_or_cache(args)
-        train, dev, test = stages._split_rows(
-            rows=rows, train_size=args.train_size, dev_size=args.dev_size,
-            test_size=args.test_size, seed=args.seed,
-        )
-        print(f"[LOAD_GPQA] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
-        return
-
-    if args.stage == "load_mmlu_pro":
-        rows = _load_mmlu_pro_or_cache(args)
-        train, dev, test = stages._split_rows(
-            rows=rows, train_size=args.train_size, dev_size=args.dev_size,
-            test_size=args.test_size, seed=args.seed,
-        )
-        print(f"[LOAD_MMLU_PRO] train/dev/test = {len(train)}/{len(dev)}/{len(test)}")
+    if args.stage in {
+        "load_medqa", "load_gpqa", "load_mmlu_pro",
+        "load_aqua_rat", "load_arc_challenge",
+    }:
+        _load_benchmark_splits(args)
         return
 
     if args.stage == "export_legalbench_jsonl":
