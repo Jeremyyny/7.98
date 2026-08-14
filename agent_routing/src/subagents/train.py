@@ -160,6 +160,8 @@ def train_subagent_sft(cfg: SFTConfig) -> None:
         per_device_train_batch_size=cfg.per_device_batch_size,
         per_device_eval_batch_size=cfg.per_device_batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         learning_rate=cfg.learning_rate,
         num_train_epochs=cfg.num_train_epochs,
         logging_steps=10,

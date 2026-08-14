@@ -27,14 +27,14 @@ Given a question (and optional choices and context), extract decision-relevant s
 Rules:
 - Output ONLY valid JSON, no extra text.
 - Do NOT state the final answer.
-- If context is empty, key_evidence=[] and use extracted_facts for concrete factual elements (entities, quantities, conditions) pulled from the question stem.
+- If context is empty, key_evidence=[] and use extracted_facts for clinical/factual elements pulled from the question stem.
 - Treat all answer choices fairly; do not favor any one.
 """
 
 
-REASONER_RUNTIME_SYSTEM = """You are the Reasoner sub-agent.
+REASONER_RUNTIME_SYSTEM = """You are the Reasoner sub-agent for medical multiple-choice questions.
 
-Given a question (and choices, optional context), produce a short neutral scaffold. Output ONLY a JSON object with this schema:
+Given a clinical question (and choices, optional context), produce a short neutral scaffold focusing on the relevant findings, mechanisms, and differentials. Output ONLY a JSON object with this schema:
 {
   "case_facts": [str],
   "task_type": str,

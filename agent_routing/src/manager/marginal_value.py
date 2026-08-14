@@ -175,7 +175,30 @@ def _tool_call_message(
     }
 
 
+def _normalize_tool_calls_mv(messages):
+    """Qwen3.5's chat template iterates tool_call.arguments with |items, so the
+    arguments must be a mapping. Convert on a deep copy."""
+    import json as _json, copy
+    out = copy.deepcopy(messages)
+    for m in out:
+        for tc in (m.get("tool_calls") or []):
+            fn_ = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+            a = fn_.get("arguments")
+            if isinstance(a, str):
+                try:
+                    fn_["arguments"] = _json.loads(a)
+                except Exception:
+                    fn_["arguments"] = {}
+            if not isinstance(fn_.get("arguments"), dict):
+                fn_["arguments"] = {}
+            if fn_ is not tc:
+                tc.setdefault("name", fn_.get("name"))
+                tc["arguments"] = fn_["arguments"]
+    return out
+
+
 def _render_chat(tokenizer: Any, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> str:
+    messages = _normalize_tool_calls_mv(messages)
     kwargs = dict(
         tools=tools,
         tokenize=False,
