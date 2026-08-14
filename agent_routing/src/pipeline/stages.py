@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..benchmarks.base import StandardRow, question_hash
+from ..benchmarks.aqua_rat import load_aqua_rat
+from ..benchmarks.arc_challenge import load_arc_challenge
 from ..benchmarks.gpqa import load_gpqa
 from ..benchmarks.legalbench import load_legalbench
 from ..benchmarks.medqa import load_medqa
@@ -309,6 +311,58 @@ def run_load_mmlu_pro(
     if cache_normalized_path:
         write_jsonl(cache_normalized_path, [r.to_dict() for r in rows])
         print(f"[LOAD_MMLU_PRO] cached normalized rows -> {cache_normalized_path}")
+    return rows
+
+
+# --------------------- Stage: AQuA-RAT loading ---------------------
+
+def run_load_aqua_rat(
+    source: str = "hf",
+    dataset_name: str = "deepmind/aqua_rat",
+    config_name: str = "raw",
+    local_path: Optional[str] = None,
+    hf_cache_dir: Optional[str] = None,
+    max_examples: int = 0,
+    splits: str = "train,validation,test",
+    cache_normalized_path: Optional[str] = None,
+) -> List[StandardRow]:
+    rows = load_aqua_rat(
+        source=source,
+        dataset_name=dataset_name,
+        config_name=config_name,
+        local_path=local_path,
+        hf_cache_dir=hf_cache_dir,
+        max_examples=max_examples,
+        splits=splits,
+    )
+    print(f"[LOAD_AQUA_RAT] loaded {len(rows)} rows from {source}")
+    if cache_normalized_path:
+        write_jsonl(cache_normalized_path, [row.to_dict() for row in rows])
+        print(f"[LOAD_AQUA_RAT] cached normalized rows -> {cache_normalized_path}")
+    return rows
+
+
+# --------------------- Stage: ARC-Challenge loading ---------------------
+
+def run_load_arc_challenge(
+    dataset_name: str = "allenai/ai2_arc",
+    config_name: str = "ARC-Challenge",
+    hf_cache_dir: Optional[str] = None,
+    max_examples: int = 0,
+    splits: str = "train,validation,test",
+    cache_normalized_path: Optional[str] = None,
+) -> List[StandardRow]:
+    rows = load_arc_challenge(
+        dataset_name=dataset_name,
+        config_name=config_name,
+        hf_cache_dir=hf_cache_dir,
+        max_examples=max_examples,
+        splits=splits,
+    )
+    print(f"[LOAD_ARC_CHALLENGE] loaded {len(rows)} rows from {dataset_name}/{config_name}")
+    if cache_normalized_path:
+        write_jsonl(cache_normalized_path, [row.to_dict() for row in rows])
+        print(f"[LOAD_ARC_CHALLENGE] cached normalized rows -> {cache_normalized_path}")
     return rows
 
 
