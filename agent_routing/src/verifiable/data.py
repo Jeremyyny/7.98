@@ -22,6 +22,17 @@ SOURCES = {
 }
 
 
+def parquet_rows(files):
+    """Read bounded HF streams without Arrow's asynchronous dataset scanner."""
+    import fsspec
+    import pyarrow.parquet as pq
+    for path in files:
+        with fsspec.open(str(path), "rb") as stream:
+            with pq.ParquetFile(stream) as parquet:
+                for batch in parquet.iter_batches(batch_size=1024, use_threads=False):
+                    yield from batch.to_pylist()
+
+
 def identity(question):
     text = unicodedata.normalize("NFKC", question)
     text = re.sub(r"\s+", "", text).casefold()
@@ -105,24 +116,34 @@ def prepare(out_dir, train_size=1024, dev_size=256, seed=42, scan_limit=30000,
             provenance[name] = {"local_file": str(path.resolve()),
                                 "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
         else:
-            from datasets import load_dataset
+            from datasets import IterableDataset, load_dataset_builder
             from huggingface_hub import HfApi
             dataset_id, split = SOURCES[name]
             revision = HfApi().dataset_info(dataset_id).sha
-            raw = load_dataset(dataset_id, revision=revision, split=split, streaming=True)
+            builder = load_dataset_builder(dataset_id, revision=revision)
+            if builder.info.builder_name != "parquet":
+                raise ValueError(f"Expected upstream Parquet files for {dataset_id}")
+            raw = IterableDataset.from_generator(parquet_rows,
+                       gen_kwargs={"files": list(builder.config.data_files[split])})
             if name == "numina":
                 raw = raw.shuffle(seed=seed, buffer_size=10000)
             provenance[name] = {"dataset": dataset_id, "revision": revision, "source_split": split}
         rows, scanned, rejected = [], 0, 0
-        for i, rec in enumerate(raw):
-            if name == "numina" and i >= scan_limit:
-                break
-            scanned += 1
-            row = normalize(rec, name, i)
-            if row is not None:
-                rows.append(row)
-            else:
-                rejected += 1
+        iterator = iter(raw)
+        try:
+            for i, rec in enumerate(iterator):
+                if name == "numina" and i >= scan_limit:
+                    break
+                scanned += 1
+                row = normalize(rec, name, i)
+                if row is not None:
+                    rows.append(row)
+                else:
+                    rejected += 1
+        finally:
+            if hasattr(iterator, "close"):
+                iterator.close()
+            del iterator, raw
         # Official eval sets must never silently shrink due to parsing/filtering.
         expected = {"aime2026": 30, "beyondaime": 100}.get(name)
         if name not in local_sources and expected and (rejected or len(rows) != expected):

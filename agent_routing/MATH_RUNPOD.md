@@ -49,7 +49,8 @@ RL 每个阶段开始时用当时的 SFT checkpoint 重新生成草稿；该阶�
 代码、虚拟环境、数据和 checkpoints 放在 `/workspace` 挂载卷，建议预留至少 100GB。网络卷可跨 Pod 保留；普通 volume disk 随 Pod 删除而消失。
 
 ```bash
-# 把本次修改后的仓库放到 /workspace/7.98
+cd /workspace
+git clone --branch codex/math-rsi-runpod https://github.com/Jeremyyny/7.98.git
 cd /workspace/7.98/agent_routing
 bash scripts/runpod_math_setup.sh
 source /workspace/margent-venv/bin/activate
@@ -183,5 +184,8 @@ CUDA_VISIBLE_DEVICES='' MARGENT_CPU_INTEGRATION=1 python -m pytest -q tests/test
 逻辑测试覆盖严格评分、gold 隔离、数据去重/切分、完整轨迹、同根分支、策略不读答案、恢复检查和两轮权重延续。
 可选 CPU 集成测试创建微型随机模型，实际运行 SFT、GRPO、保存及重新加载 LoRA，不下载 9B 权重。
 这不替代 RunPod 上的 Qwen3.5 CUDA、长上下文、工具调用和性能验收。
+
+本地测试包含上述 CPU 集成测试及流式读取提前结束的进程退出检查；实际下载并完整保留 AIME 2026 的 30 题和 BeyondAIME 的 100 题，
+另用 NuminaMath 小样本验证过滤与切分。数据准备通过 HF 的文件映射逐批读取 Parquet、关闭 Arrow 读取线程并显式关闭迭代器，规避上游 [流式读取退出卡住的问题](https://github.com/apache/arrow/issues/50482)。
 
 参考：[Math-Verify](https://github.com/huggingface/Math-Verify)、[NuminaMath-1.5](https://huggingface.co/datasets/AI-MO/NuminaMath-1.5)、[AIME 2026](https://huggingface.co/datasets/MathArena/aime_2026)、[BeyondAIME](https://huggingface.co/datasets/ByteDance-Seed/BeyondAIME)、[TRL 0.29 GRPO](https://huggingface.co/docs/trl/v0.29.0/grpo_trainer)、[RunPod storage](https://docs.runpod.io/pods/storage/types)。

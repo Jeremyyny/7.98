@@ -5,12 +5,32 @@ MARGENT_CPU_INTEGRATION=1 python -m pytest -q tests/test_math_training_integrati
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
 
 @unittest.skipUnless(os.environ.get("MARGENT_CPU_INTEGRATION") == "1", "opt-in tiny CPU training")
 class TrainingIntegrationTest(unittest.TestCase):
+    def test_bounded_parquet_stream_exits_cleanly(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "data.parquet"
+            pq.write_table(pa.table({"answer": list(range(20000))}), path)
+            result = subprocess.run([sys.executable, "-c", """
+import sys
+from datasets import IterableDataset
+from src.verifiable.data import parquet_rows
+ds = IterableDataset.from_generator(parquet_rows, gen_kwargs={"files": [sys.argv[1]]})
+it = iter(ds.shuffle(seed=42, buffer_size=10000))
+assert isinstance(next(it)["answer"], int)
+it.close()
+""", str(path)], capture_output=True, text=True, timeout=30,
+                env={**os.environ, "HF_HOME": str(Path(tmp) / "hf-cache")})
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_qwen35_multimodal_checkpoint_loads_identical_text_weights(self):
         import torch
         from transformers import Qwen3_5Config, Qwen3_5ForConditionalGeneration, Qwen3_5ForCausalLM
