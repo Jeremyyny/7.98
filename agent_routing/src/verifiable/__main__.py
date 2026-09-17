@@ -10,10 +10,11 @@ from pathlib import Path
 from ..utils.io import read_jsonl, write_json
 from .data import prepare
 from .experiment import compare
-from .runner import load_config, run_data, run_loop
+from .runner import evaluate_suite, load_config, run_data, run_loop
 
 
 def doctor(config, output):
+    import requests
     import torch
     import transformers
     from trl import GRPOConfig, GRPOTrainer
@@ -43,11 +44,20 @@ def doctor(config, output):
     parsed = tok.parse_response('<tool_call>{"name":"reasoner_tool","arguments":{}}</tool_call><|im_end|>')
     if parsed["tool_calls"][0]["function"]["name"] != "reasoner_tool":
         raise RuntimeError("Native tool parsing failed")
+    health = requests.get(config["advisor_url"].rstrip("/") + "/health", timeout=15)
+    health.raise_for_status()
+    try:
+        advisor = health.json()
+    except ValueError:
+        advisor = {"external_advisor_identity": config.get("external_advisor_identity")}
+    if advisor.get("status") != "ready" and not config.get("external_advisor_identity"):
+        raise RuntimeError("Frozen advisor server is not ready")
     result = {"packages": {name: importlib.metadata.version(name) for name in
               ("torch", "transformers", "trl", "peft", "datasets", "math-verify")},
               "gpu": torch.cuda.get_device_name(0),
               "vram_gib": torch.cuda.get_device_properties(0).total_memory / 2 ** 30,
               "model_type": model_cfg.model_type,
+              "advisor": advisor,
               "note": "API and template preflight only; run the GPU smoke test before the main experiment"}
     write_json(output, result)
     return result
@@ -90,8 +100,27 @@ def main():
     cmp.add_argument("--before", required=True)
     cmp.add_argument("--after", required=True)
     cmp.add_argument("--out", required=True)
+    status = sub.add_parser("status", help="Read phase/heartbeat/progress/failure state without loading a model")
+    status.add_argument("--run-dir", required=True)
+    suite = sub.add_parser("evaluate-suite", help="Locked initial/final checkpoints on both external test sets")
+    suite.add_argument("--run-dir", required=True)
+    suite.add_argument("--data-dir", required=True)
+    suite.add_argument("--dry-run", action="store_true")
+    report = sub.add_parser("report", help="Recompute CSV/LaTeX tables and PDF/PNG figures from observed records")
+    report.add_argument("--runs", nargs="+", required=True)
+    report.add_argument("--out", required=True)
     args = p.parse_args()
-    if args.command == "prepare":
+    if args.command == "status":
+        from .telemetry import status_snapshot
+        result = status_snapshot(args.run_dir)
+    elif args.command == "evaluate-suite":
+        result = evaluate_suite(args.run_dir, args.data_dir, args.dry_run)
+        if args.dry_run:
+            return
+    elif args.command == "report":
+        from .reporting import generate_report
+        result = generate_report(args.runs, args.out)
+    elif args.command == "prepare":
         sources = {name: getattr(args, "local_" + name) for name in ("numina", "aime2026", "beyondaime")
                    if getattr(args, "local_" + name)}
         result = prepare(args.data_dir, args.train_size, args.dev_size, args.seed, args.scan_limit, sources)

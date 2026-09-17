@@ -1,0 +1,182 @@
+"""Local, append-only experiment telemetry. No external logging service required."""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+import importlib.metadata
+import os
+from pathlib import Path
+import socket
+import shutil
+import subprocess
+import threading
+import time
+import traceback
+import uuid
+
+from ..utils.io import append_jsonl
+
+ACTIVE = None
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+class Monitor:
+    """Start only AFTER validating/creating the experiment manifest."""
+    def __init__(self, output, stage, interval=20):
+        self.root, self.stage, self.interval = Path(output), stage, interval
+        self.attempt = uuid.uuid4().hex
+        self.stop = threading.Event()
+        self.lock = threading.RLock()
+        self.state = {"schema_version": 1, "stage": stage, "attempt": self.attempt,
+                      "status": "running", "started_at": now(), "pid": os.getpid(),
+                      "hostname": socket.gethostname(), "progress": {}}
+
+    def __enter__(self):
+        global ACTIVE
+        self.previous, ACTIVE = ACTIVE, self
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.started = time.monotonic()
+        packages = {}
+        for name in ("torch", "transformers", "trl", "peft", "datasets", "math-verify", "matplotlib"):
+            try:
+                packages[name] = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                packages[name] = None
+        try:
+            git = subprocess.run(["/usr/bin/git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5)
+            commit = git.stdout.strip() if git.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            commit = None
+        atomic_json(self.root / f"environment_{self.attempt}.json", {"packages": packages, "git_commit": commit,
+                    "hostname": socket.gethostname(), "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+                    "note": "GPU samples are device-level and can include other processes"})
+        self.event("started")
+        self.update()
+        self.thread = threading.Thread(target=self._heartbeat, daemon=True)
+        self.thread.start()
+        return self
+
+    def update(self, **progress):
+        with self.lock:
+            if progress:
+                self.state["last_progress_at"] = now()
+            self.state["progress"].update(progress)
+            self.state.update(updated_at=now(), elapsed_seconds=time.monotonic() - self.started,
+                              disk_free_bytes=shutil.disk_usage(self.root).free)
+            atomic_json(self.root / "status.json", self.state)
+
+    def event(self, event, **values):
+        with self.lock:
+            append_jsonl(str(self.root / "events.jsonl"), [{"time": now(), "attempt": self.attempt,
+                         "event": event, **values}])
+
+    def usage(self, role, value, **extra):
+        fields = ("prompt_tokens", "completion_tokens", "actual_prompt_tokens", "actual_completion_tokens",
+                  "seconds", "cache_hit", "truncated")
+        item = {k: value[k] for k in fields if k in value}
+        item.update(time=now(), attempt=self.attempt, role=role, context=dict(self.state["progress"]), **extra)
+        with self.lock:
+            append_jsonl(str(self.root / "usage.jsonl"), [item])
+
+    def _heartbeat(self):
+        while not self.stop.is_set():
+            try:
+                self.update()
+                result = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid,memory.used,memory.total,utilization.gpu,power.draw",
+                                         "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    with self.lock:
+                        append_jsonl(str(self.root / "gpu_samples.jsonl"), [{"time": now(), "attempt": self.attempt,
+                            "columns": ["index", "uuid", "memory_used_mib", "memory_total_mib", "utilization_percent", "power_watts"],
+                            "devices": [line.split(", ") for line in result.stdout.strip().splitlines()]}])
+            except FileNotFoundError:
+                pass  # CPU validation has no nvidia-smi.
+            except Exception as exc:
+                self.event("monitor_warning", error=str(exc))
+            self.stop.wait(self.interval)
+
+    def __exit__(self, typ, value, tb):
+        global ACTIVE
+        self.stop.set()
+        self.thread.join(timeout=6)
+        elapsed = time.monotonic() - self.started
+        status = "completed" if typ is None else "interrupted" if issubclass(typ, KeyboardInterrupt) else "failed"
+        self.state.update(status=status, finished_at=now())
+        if typ:
+            error = "".join(traceback.format_exception(typ, value, tb))
+            self.state["error"] = str(value)
+            with (self.root / "errors.log").open("a", encoding="utf-8") as out:
+                out.write(f"\n{now()} attempt={self.attempt}\n{error}")
+        self.event(status, wall_seconds=elapsed, error=str(value) if typ else None)
+        self.update()
+        ACTIVE = self.previous
+
+
+def progress(**values):
+    if ACTIVE:
+        ACTIVE.update(**values)
+
+
+def usage(role, value, **extra):
+    if ACTIVE:
+        ACTIVE.usage(role, value, **extra)
+
+
+def status_snapshot(run_dir):
+    root = Path(run_dir)
+    entries = []
+    for path in sorted(root.rglob("status.json")):
+        state = json.loads(path.read_text())
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(state["updated_at"])).total_seconds()
+        state["heartbeat_age_seconds"] = round(age, 1)
+        if state.get("last_progress_at"):
+            state["progress_age_seconds"] = round((datetime.now(timezone.utc) - datetime.fromisoformat(state["last_progress_at"])).total_seconds(), 1)
+        if state["status"] == "running":
+            state["liveness"] = "recent_heartbeat" if age < 120 else "stale_heartbeat"
+            if state["hostname"] == socket.gethostname():
+                try:
+                    os.kill(state["pid"], 0)
+                except ProcessLookupError:
+                    state["liveness"] = "process_missing"
+                except PermissionError:
+                    state["liveness"] = "process_not_accessible"
+        entries.append({"path": str(path.parent.relative_to(root)), **state})
+    plan = json.loads((root / "loop.json").read_text()).get("plan", []) if (root / "loop.json").exists() else []
+    return {"run_dir": str(root), "states": entries,
+            "stages": [{"stage": p["stage"], "path": p["output"],
+                        "complete": (Path(p["output"]) / ".stage_complete.json").exists()} for p in plan],
+            "note": "Heartbeat reports process activity, not convergence. SIGKILL/power loss is detected as stale or missing."}
+
+
+def training_callback(output):
+    from transformers import TrainerCallback
+
+    class Callback(TrainerCallback):
+        def on_train_begin(self, args, state, control, **kwargs):
+            progress(phase="training", step=state.global_step, max_steps=state.max_steps)
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            append_jsonl(str(Path(output) / "training_log.jsonl"), [{"time": now(),
+                         "attempt": ACTIVE.attempt if ACTIVE else None, "step": state.global_step,
+                         "epoch": state.epoch, **(logs or {})}])
+
+        def on_step_end(self, args, state, control, **kwargs):
+            progress(phase="training", step=state.global_step, max_steps=state.max_steps, epoch=state.epoch)
+
+        def on_save(self, args, state, control, **kwargs):
+            if ACTIVE:
+                ACTIVE.event("checkpoint_saved", step=state.global_step,
+                             path=str(Path(output) / f"checkpoint-{state.global_step}"))
+
+    return Callback()

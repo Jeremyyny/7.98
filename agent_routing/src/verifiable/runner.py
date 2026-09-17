@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import signal
 import shlex
 import subprocess
 import sys
@@ -13,6 +15,7 @@ from ..utils.io import append_jsonl, read_jsonl, write_json, write_jsonl
 from .backend import HFBackend, HTTPAdvisors
 from .data import identity, load_rows, verify_manifest
 from .experiment import collect_one, compare, policy_rollout, root_state, sft_rows, summary
+from .telemetry import Monitor, atomic_json, progress
 
 
 def _digest(path):
@@ -68,39 +71,43 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
     if len(seen) != len(records) or seen - {identity(r.question) for r in rows}:
         raise ValueError("Invalid resume record identities")
     pending = [r for r in rows if identity(r.question) not in seen]
-    if pending:
-        backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"])
-        advisors = advisors or HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"))
-    started = time.monotonic()
-    for row in pending:
-        seed = (cfg["seed"] + int(identity(row.question)[:8], 16)) % (2 ** 31)
-        if mode == "evaluate":
-            direct, history = root_state(row, backend, cfg, seed)
-            from .answers import correct
-            policy = policy_rollout(row, backend, advisors, cfg, seed, direct, history)
-            record = {"question_hash": identity(row.question), "example_id": row.example_id,
-                      "benchmark_name": row.benchmark_name, "split": row.split,
-                      "direct_correct": bool(direct["valid"] and correct(direct["text"], row.ground_truth)),
-                      "direct_text": direct["text"], "policy": policy,
-                      "costs": [{"role": "manager", **direct}] + policy["costs"]}
-        else:
-            record = collect_one(row, backend, advisors, cfg, seed, evaluate_policy=mode == "diagnose")
-        append_jsonl(str(path), [record])
-        records.append(record)
-        print(f"[{mode}] {len(records)}/{len(rows)} direct={record['direct_correct']}", flush=True)
-    result = summary(records)
-    result.update(checkpoint=checkpoint, verification_scope="terminal_answer", mode=mode)
-    if mode == "collect":
-        turns = sft_rows(records, cfg["seed"], cfg.get("commit_rescue_ratio", 1),
-                         cfg.get("distill_solutions", True), selection)
-        if not turns:
-            raise ValueError("No successful trajectories: inspect pilot before launching training")
-        write_jsonl(str(root / "sft.jsonl"), turns)
-        result["sft_turns"] = len(turns)
-    append_jsonl(str(root / "attempts.jsonl"), [{"completed_examples_this_attempt": len(pending),
-                                               "wall_seconds": time.monotonic() - started}])
-    write_json(str(root / "summary.json"), result)
-    return result
+    with Monitor(output, mode):
+        if pending:
+            backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"])
+            advisors = advisors or HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"))
+        started = time.monotonic()
+        for row in pending:
+            progress(completed_examples=len(records), total_examples=len(rows), question_hash=identity(row.question))
+            seed = (cfg["seed"] + int(identity(row.question)[:8], 16)) % (2 ** 31)
+            if mode == "evaluate":
+                direct, history = root_state(row, backend, cfg, seed)
+                from .answers import correct
+                policy = policy_rollout(row, backend, advisors, cfg, seed, direct, history)
+                record = {"question_hash": identity(row.question), "example_id": row.example_id,
+                          "benchmark_name": row.benchmark_name, "split": row.split,
+                          "direct_correct": bool(direct["valid"] and correct(direct["text"], row.ground_truth)),
+                          "direct_valid": direct["valid"], "direct_truncated": direct.get("truncated", False),
+                          "direct_text": direct["text"], "policy": policy,
+                          "costs": [{"role": "manager", **direct}] + policy["costs"]}
+            else:
+                record = collect_one(row, backend, advisors, cfg, seed, evaluate_policy=mode == "diagnose")
+            append_jsonl(str(path), [record])
+            records.append(record)
+            progress(completed_examples=len(records), total_examples=len(rows))
+            print(f"[{mode}] {len(records)}/{len(rows)} direct={record['direct_correct']}", flush=True)
+        result = summary(records)
+        result.update(checkpoint=checkpoint, verification_scope="terminal_answer", mode=mode)
+        if mode == "collect":
+            turns = sft_rows(records, cfg["seed"], cfg.get("commit_rescue_ratio", 1),
+                             cfg.get("distill_solutions", True), selection)
+            if not turns:
+                raise ValueError("No successful trajectories: inspect pilot before launching training")
+            write_jsonl(str(root / "sft.jsonl"), turns)
+            result["sft_turns"] = len(turns)
+        append_jsonl(str(root / "attempts.jsonl"), [{"completed_examples_this_attempt": len(pending),
+                                                   "wall_seconds": time.monotonic() - started}])
+        write_json(str(root / "summary.json"), result)
+        return result
 
 
 def build_plan(config_path, data_dir, output, arm, rounds, initial=None):
@@ -155,24 +162,121 @@ def run_loop(config_path, data_dir, output, arm, rounds, initial=None, resume=Fa
         if any(root.iterdir()):
             raise ValueError("Loop output is not empty")
         write_json(str(runfile), signature)
-    for step in plan:
-        out = Path(step["output"])
-        done = out / ".stage_complete.json"
-        if done.exists():
-            if json.loads(done.read_text())["command"] != step["command"]:
-                raise ValueError("Completed stage command changed")
-            continue
-        print(shlex.join(step["command"]), flush=True)
-        start = time.monotonic()
-        # A separate process releases all manager weights before the next stage.
-        subprocess.run(step["command"], check=True)
-        write_json(str(done), {"command": step["command"], "wall_seconds": time.monotonic() - start})
-    checkpoints = [step for step in plan if step["stage"] == "diagnose"]
-    reports = []
-    before = read_jsonl(str(Path(checkpoints[0]["output"]) / "records.jsonl"))
-    for step in checkpoints[1:]:
-        after = read_jsonl(str(Path(step["output"]) / "records.jsonl"))
-        reports.append({"checkpoint": step["output"], "vs_initial": compare(before, after),
-                        "summary": json.loads((Path(step["output"]) / "summary.json").read_text())})
-    write_json(str(root / "loop_report.json"), reports)
-    return reports
+    with Monitor(root, "loop"):
+        for i, step in enumerate(plan):
+            progress(stage_index=i + 1, total_stages=len(plan), current_stage=step["stage"], output=step["output"])
+            if not (Path(step["output"]) / ".stage_complete.json").exists():
+                verify_advisor(signature["config"], root)
+            execute_stage(step, root / "logs")
+        checkpoints = [step for step in plan if step["stage"] == "diagnose"]
+        reports = []
+        before = read_jsonl(str(Path(checkpoints[0]["output"]) / "records.jsonl"))
+        for step in checkpoints[1:]:
+            after = read_jsonl(str(Path(step["output"]) / "records.jsonl"))
+            reports.append({"checkpoint": step["output"], "vs_initial": compare(before, after),
+                            "summary": json.loads((Path(step["output"]) / "summary.json").read_text())})
+        write_json(str(root / "loop_report.json"), reports)
+        return reports
+
+
+def execute_stage(step, log_dir):
+    """Keep console output and propagate failure; never mark a failed stage done."""
+    out = Path(step["output"])
+    done = out / ".stage_complete.json"
+    if done.exists():
+        if json.loads(done.read_text())["command"] != step["command"]:
+            raise ValueError("Completed stage command changed")
+        validate_stage_artifacts(out, step["stage"])
+        return
+    print(shlex.join(step["command"]), flush=True)
+    logs = Path(log_dir)
+    logs.mkdir(parents=True, exist_ok=True)
+    name = "_".join(out.parts[-3:]) + ".log"
+    start = time.monotonic()
+    with (logs / name).open("a", encoding="utf-8") as log:
+        process = subprocess.Popen(step["command"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, bufsize=1, start_new_session=True,
+                                   env={**os.environ, "PYTHONUNBUFFERED": "1"})
+        try:
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                print(line, end="", flush=True)
+            code = process.wait()
+            if code:
+                raise subprocess.CalledProcessError(code, step["command"])
+        except BaseException:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+            raise
+    validate_stage_artifacts(out, step["stage"])
+    atomic_json(done, {"command": step["command"], "wall_seconds": time.monotonic() - start})
+
+
+def validate_stage_artifacts(output, stage):
+    names = ["training_metrics.json", "adapter_config.json"] if stage in {"sft", "rl"} else ["summary.json", "records.jsonl"]
+    if stage == "collect":
+        names.append("sft.jsonl")
+    if stage in {"sft", "rl"} and not any((output / n).exists() for n in ("adapter_model.safetensors", "adapter_model.bin")):
+        raise ValueError(f"Adapter weights missing from completed stage: {output}")
+    for name in names:
+        if not (output / name).exists():
+            raise ValueError(f"Completed stage artifact missing: {output / name}")
+
+
+def evaluate_suite(run_dir, data_dir, dry_run=False):
+    root = Path(run_dir).resolve()
+    run = json.loads((root / "loop.json").read_text())
+    if verify_manifest(data_dir) != run["data_manifest"]:
+        raise ValueError("External evaluation data differ from the frozen experiment manifest")
+    training = [p for p in run["plan"] if p["stage"] in {"sft", "rl"}]
+    if not training or not all((Path(p["output"]) / ".stage_complete.json").exists() for p in run["plan"]):
+        raise ValueError("Complete the planned loop before the locked initial/final external evaluation")
+    config_path = root / "evaluation_config.json"
+    plan = []
+    for label, checkpoint in [("initial", run["initial"] or run["config"]["base_model"]),
+                              ("final", training[-1]["output"])]:
+        for name in ("aime2026", "beyondaime"):
+            output = root / "test" / label / name
+            plan.append({"stage": "evaluate", "output": str(output), "command": [sys.executable, "-m",
+                "src.verifiable", "evaluate", "--config", str(config_path), "--data",
+                str(Path(data_dir).resolve() / f"{name}.jsonl"), "--checkpoint", checkpoint,
+                "--out", str(output), "--resume"]})
+    if dry_run:
+        for step in plan:
+            print(shlex.join(step["command"]))
+        return plan
+    atomic_json(config_path, run["config"])
+    with Monitor(root / "test", "evaluate_suite"):
+        for i, step in enumerate(plan):
+            progress(stage_index=i + 1, total_stages=len(plan), output=step["output"])
+            if not (Path(step["output"]) / ".stage_complete.json").exists():
+                verify_advisor(run["config"], root)
+            execute_stage(step, root / "logs")
+    return {"evaluations": [p["output"] for p in plan]}
+
+
+def verify_advisor(config, root):
+    import requests
+    response = requests.get(config["advisor_url"].rstrip("/") + "/health", timeout=15)
+    response.raise_for_status()
+    try:
+        value = response.json()
+    except ValueError:
+        value = {}
+    identity = value.get("margent_advisor")
+    if identity is None:
+        # External servers may provide an explicit immutable identity in config.
+        identity = config.get("external_advisor_identity")
+        if identity is None:
+            raise ValueError("Advisor identity unavailable: use the bundled server or declare external_advisor_identity")
+    path = Path(root) / "advisor_identity.json"
+    if path.exists() and json.loads(path.read_text()) != identity:
+        raise ValueError("Frozen advisor identity changed across stages; use the original advisor")
+    atomic_json(path, identity)
+    return identity

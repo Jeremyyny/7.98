@@ -98,3 +98,9 @@ it.close()
             train_rl(cfg, str(root / "sft"), str(normalized), str(root / "rl"))
             metrics = json.loads((root / "rl/training_metrics.json").read_text())
             self.assertIn("train_loss", metrics)
+            usage = [json.loads(line) for line in (root / "rl/usage.jsonl").read_text().splitlines()]
+            self.assertTrue(any(r["role"] == "manager_rl" and r["completion_tokens"] > 0 for r in usage))
+            self.assertEqual(json.loads((root / "rl/status.json").read_text())["status"], "completed")
+            self.assertTrue((root / "rl/training_log.jsonl").exists())
+            rollouts = [json.loads(line) for line in (root / "rl/rollouts.jsonl").read_text().splitlines()]
+            self.assertTrue(all("completion" in r and r["step"] is not None for r in rollouts))

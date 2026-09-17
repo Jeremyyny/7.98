@@ -39,6 +39,7 @@ RL 每个阶段开始时用当时的 SFT checkpoint 重新生成草稿；该阶�
 
 默认 advisor 服务是一个**冻结的基础模型，采用三个数学角色提示**，不需要外部付费 API，也不会自动使用旧医学 LoRA。
 如已有数学 advisor adapters，可用兼容的模型服务提供三个别名，并在配置的 `advisor_models` 中映射。第一版保持整个循环的 advisor 权重不变。
+内置服务会返回模型 revision、adapter 身份和模板哈希；每阶段开始检查身份是否仍一致。外部服务须提供可访问的 `/health`，并在配置中声明不可变的 `external_advisor_identity`（模型、revision、adapter 哈希）；这种声明仍需实验者保证服务实际与之匹配。
 
 ## RunPod 环境
 
@@ -145,6 +146,117 @@ CUDA_VISIBLE_DEVICES=1 python -m src.verifiable loop --config configs/math_rsi.j
 改了模型、配置、数据或轮数，请使用新的输出目录。`--resume` 不会混用不同实验。
 
 ## 最终测试和结果
+
+### 推荐的完整运行入口（含固定的最终测试）
+
+通过上述 0.6B smoke test 和 32 题 pilot，冻结 `configs/math_rsi.json` 的预算后，可以直接运行：
+
+```bash
+# 终端 A：正式 advisor，整个实验期间保持同一模型/adapter。
+cd /workspace/7.98/agent_routing
+source /workspace/margent-venv/bin/activate
+export HF_HOME=/workspace/hf-cache
+CUDA_VISIBLE_DEVICES=0 python -m src.verifiable.serve --model Qwen/Qwen3.5-9B --max-context 24576
+```
+
+```bash
+# 终端 B：先跑一个 arm、一个 seed。建议放在 tmux 等持久终端会话内。
+cd /workspace/7.98/agent_routing
+source /workspace/margent-venv/bin/activate
+export HF_HOME=/workspace/hf-cache
+CUDA_VISIBLE_DEVICES=1 bash scripts/runpod_math_experiment.sh dynamic_rl 42
+```
+
+该脚本保存冻结配置，执行 `doctor` → 两轮 loop → `evaluate-suite`。
+最后一步只评估预先指定的初始模型与末轮模型，在 AIME 2026 / BeyondAIME 上各评一次；不会按外部测试分数自动选 checkpoint。
+输出目录为 `/workspace/margent-runs/dynamic_rl_s42`。中断后重跑同一命令即可恢复。
+若使用上文手动创建的 `/workspace/margent-runs/dynamic_rl`，继续使用原目录；不要把新脚本的 `_s42` 目录误当作已有实验。
+
+其余对照沿用同一数据切分和配置，分别运行：
+
+```bash
+CUDA_VISIBLE_DEVICES=1 bash scripts/runpod_math_experiment.sh dynamic_sft 42
+CUDA_VISIBLE_DEVICES=1 bash scripts/runpod_math_experiment.sh static_rl 42
+CUDA_VISIBLE_DEVICES=1 bash scripts/runpod_math_experiment.sh success_rl 42
+```
+
+资源允许时把训练 seed 换成 43、44 重复；**不重新准备/切分数据**，保证开发集和测试集相同。
+先用 pilot 实测每题耗时再决定重复次数；本实现没有对四个 arm × 三个 seed 的总成本或截止日前完成作保证。
+
+### 运行期间怎么看状态
+
+```bash
+python -m src.verifiable status --run-dir /workspace/margent-runs/dynamic_rl_s42
+```
+
+它不加载模型，可在另一终端重复执行。返回总体阶段、每阶段状态、完成题数/总题数、当前题目哈希、
+当前反事实分支或训练步数、心跳年龄、最近进度年龄、剩余磁盘容量。
+每 20 秒采样一次 GPU 显存、利用率和功耗；这些是整张设备的值，可能包含其他进程。
+`recent_heartbeat` 只表示进程还在响应，**不等于训练正在改善或没有卡在网络请求**。
+
+| 检查对象 | 检查与记录 |
+|---|---|
+| 环境 | CUDA、库/API、模板解析、评分器、advisor health；保存版本、Git commit、模型 revision |
+| 数据 | 数据 SHA、固定 split、去重、官方测试题数；禁止 dev/test 导出训练目标 |
+| 反事实搜索 | 当前分支与完整轨迹；深度 2 枚举 3+6 个不重复 advisor 序列；报表再次核验分支集合完整 |
+| 输出协议 | 最终答案、调用格式、重复调用、超调用预算、截断与 HTTP 错误 |
+| SFT | 保留/丢弃样本、实际处理 token、loss、learning rate、gradient norm（Trainer 提供时）、训练步数 |
+| RL | 完整 rollout、最终答案、奖励、调用、每个生成回合 token、reward/零方差组等 Trainer 日志 |
+| 恢复与失败 | 配置/checkpoint 身份、阶段产物、保存事件、失败 traceback、控制台日志；失败不标记完成 |
+| Advisor 冻结 | 每阶段核对 identity，内置服务单阶段内也检查 identity 不变 |
+
+阶段开始验证后，状态写在 `status.json`，事件追加到 `events.jsonl`，异常写入 `errors.log`。
+loop 的子进程 stdout/stderr 保存到根目录 `logs/`；GPU 采样为 `gpu_samples.jsonl`，训练日志为 `training_log.jsonl`。
+Pod 被强杀或断电时不能保证写出最后一条异常；重查状态会显示心跳过期/进程不存在，成本也标为不完整。
+若中断留下损坏的 JSONL 尾行，会明确报解析错误，需要检查恢复，不能把损坏数据静默计入论文结果。
+
+### 一条命令形成论文数据包
+
+```bash
+python -m src.verifiable report \
+  --runs /workspace/margent-runs/dynamic_rl_s42 \
+         /workspace/margent-runs/dynamic_sft_s42 \
+         /workspace/margent-runs/static_rl_s42 \
+         /workspace/margent-runs/success_rl_s42 \
+  --out /workspace/margent-paper
+```
+
+只完成一个实验时，`--runs` 后只填写该目录。目录名称必须唯一，推荐 `arm_s42`、`arm_s43`。
+相同 `--runs` 可以反复刷新报表；增删运行目录时换一个新的 `--out`，避免混用旧图。
+手动 loop 用户可以先执行 `python -m src.verifiable evaluate-suite --run-dir 原实验目录 --data-dir /workspace/margent-data`，
+再把原实验目录传给 report。之前手动存放在其他位置的测试结果不会被自动猜测归属。
+report 可在实验中途运行：未完成阶段/缺失测试会列出提醒，不补零；旧版本没有记录的成本不会补造。
+不同的输入集合、记录重复、summary 与逐题结果不一致、有限搜索分支缺失会报错。
+
+| 论文数据/图 | 文件与用途 |
+|---|---|
+| 外部测试主表 | `paper_main.tex/.csv`：初始/最终模型的独立正确率、部署策略正确率、95% 题级区间、平均调用数 |
+| 机制表 | `paper_mechanism.tex/.csv`：每个 checkpoint 的 D/P/C、初始救援题的内化数量、初始有限搜索未解而现可独立解的题数 |
+| 完整统计 | `main_results.csv`、`development.csv`：精确指标、格式正确率、截断率、自我续写和救援率等 |
+| 配对变化 | `paired_changes.csv`：相对初始及相邻 checkpoint 的新增/退步、配对 bootstrap 区间、探索性 McNemar p 值 |
+| 可追溯题目 | `paired_questions.jsonl`：每道题的前后结果及内化/退步标记，可以回查原始完整推导 |
+| 多 seed | `seed_summary.csv`：同 arm、同协议、同外部数据的均值和样本标准差；单 seed 的标准差留空 |
+| 成本与训练 | `costs.csv`、`training_diagnostics.csv`：方法/诊断/测试各阶段分列；保留失败重试和来源日志 |
+| 图 1 | `fig1_development.pdf/.png`：D/P/有限搜索覆盖随轮次变化，各运行独立成线 |
+| 图 2 | `fig2_internalization.pdf/.png`：新增与退步、初始救援题变成独立可解的比例 |
+| 图 3 | `fig3_external_tests.pdf/.png`：AIME / BeyondAIME 初始与最终结果及题级区间 |
+| 图 4 | `fig4_costs.pdf/.png`：累计方法阶段时间—开发集效果，以及部署调用数—外部测试效果 |
+| 图 5 | `fig5_rl_training.pdf/.png`：RL reward 与零方差组；有对应日志才生成 |
+| 审计清单 | `report_manifest.json`：输入文件 SHA、配置、数据来源、缺失项、统计与成本口径；`README.md` 可预览图 |
+
+正文优先放主表、图 1 和图 2；对照与成本根据篇幅放主文或附录，RL 曲线适合附录。
+完整 LaTeX 导出供编辑，`paper_main.tex` 与 `paper_mechanism.tex` 是精简版本，其他 CSV 是分析用宽表。
+
+95% Wilson 区间与配对 bootstrap 衡量**题目维度**的不确定性；不代替多个训练 seed 的重复实验。
+McNemar p 值未做多重比较校正，只作为探索性诊断，不自动标显著性。
+图中每条运行曲线对应一个 seed；多个 seed 的聚合统计另在 `seed_summary.csv` 中，不把重复题目当作新增独立样本。
+“初始有限搜索之外的新解题”只针对固定搜索预算，不能写成证明突破模型真实能力上限。
+
+`usage.jsonl` 区分 manager/advisor 的实际生成量与逻辑调用量；RL 会记录每个真实生成回合，SFT 记录处理过的输入/监督 token。
+方法成本曲线累计 collection/SFT/RL 阶段，开发诊断与外部测试单列；训练前后向计算并未换算成 FLOPs。
+阶段耗时也不是 RunPod 账单 GPU 小时。失败或断电可能丢失正在执行的请求成本，报表会把这些运行从完整成本曲线中排除，原始已观测成本仍保留。
+
+以下为原有逐项评估命令，仍可使用：
 
 循环只看 `dev.jsonl`，不会自动用 AIME/BeyondAIME 选 checkpoint。固定实验选择后显式运行：
 

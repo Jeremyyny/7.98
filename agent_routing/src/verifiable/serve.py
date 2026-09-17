@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import hashlib
+from pathlib import Path
 
 from .backend import HFBackend
 from .protocol import KINDS
@@ -17,6 +19,10 @@ def main():
     p.add_argument("--max-context", type=int, default=16384)
     args = p.parse_args()
     backend = HFBackend(args.model, args.checkpoint, args.max_context)
+    from .runner import checkpoint_identity
+    fingerprint = {"model": args.model, "checkpoint": checkpoint_identity(args.checkpoint or args.model),
+                   "resolved_revision": getattr(backend.model.config, "_commit_hash", None),
+                   "template_sha256": hashlib.sha256(Path(__file__).with_name("chat_template.jinja").read_bytes()).hexdigest()}
 
     class Handler(BaseHTTPRequestHandler):
         def send_json(self, code, data):
@@ -29,7 +35,7 @@ def main():
 
         def do_GET(self):
             self.send_json(200, {"status": "ready", "model": args.model,
-                                 "checkpoint": args.checkpoint, "aliases": KINDS})
+                                 "checkpoint": args.checkpoint, "aliases": KINDS, "margent_advisor": fingerprint})
 
         def do_POST(self):
             try:
@@ -44,7 +50,7 @@ def main():
                 result = backend.generate(request["messages"], max_tokens=int(request["max_tokens"]))
                 self.send_json(200, {"choices": [{"message": {"role": "assistant", "content": result["text"]},
                     "finish_reason": "length" if result["truncated"] else "stop"}], "usage": {
-                    "prompt_tokens": result["prompt_tokens"], "completion_tokens": result["completion_tokens"]}})
+                    "prompt_tokens": result["prompt_tokens"], "completion_tokens": result["completion_tokens"]}, "margent_advisor": fingerprint})
             except Exception as exc:
                 self.send_json(500, {"error": str(exc)})
 

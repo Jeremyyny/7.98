@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 
 from .protocol import advisor_messages
+from .telemetry import usage, progress
 
 
 def configure_tokenizer(tok):
@@ -26,6 +27,7 @@ def configure_tokenizer(tok):
 
 
 def load_model(base_model, checkpoint=None, trainable=False, lora_rank=16):
+    progress(phase="loading_model", checkpoint=checkpoint or base_model)
     import torch
     import transformers as tr
     from peft import LoraConfig, PeftModel, get_peft_model
@@ -69,6 +71,9 @@ def load_model(base_model, checkpoint=None, trainable=False, lora_rank=16):
     else:
         model.eval()
         model.requires_grad_(False)
+    usage("model_load", {}, base_model=base_model, checkpoint=source,
+          resolved_revision=getattr(config, "_commit_hash", None),
+          template_sha256=hashlib.sha256(tok.chat_template.encode()).hexdigest())
     return tok, model
 
 
@@ -97,10 +102,12 @@ class HFBackend:
                 do_sample=temperature > 0, pad_token_id=self.tokenizer.pad_token_id,
                 **({"temperature": temperature} if temperature > 0 else {}))
         ids = out[0, n:]
-        return {"text": self.tokenizer.decode(ids, skip_special_tokens=True).strip(),
+        result = {"text": self.tokenizer.decode(ids, skip_special_tokens=True).strip(),
                 "prompt_tokens": n, "completion_tokens": len(ids),
                 "seconds": time.monotonic() - start,
                 "truncated": bool(len(ids) >= max_tokens and int(ids[-1]) != self.tokenizer.eos_token_id)}
+        usage("manager", result)
+        return result
 
 
 class HTTPAdvisors:
@@ -115,6 +122,7 @@ class HTTPAdvisors:
         self.models = models or {k: k for k in ("extractor", "reasoner", "verifier")}
         self.timeout = timeout
         self.cache = {}
+        self.identity = None
 
     def call(self, kind, row, draft=""):
         import requests
@@ -124,22 +132,29 @@ class HTTPAdvisors:
         key = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
         if key in self.cache:
             value = dict(self.cache[key])
-            value.update(cache_hit=True, actual_completion_tokens=0, actual_prompt_tokens=0)
+            value.update(cache_hit=True, actual_completion_tokens=0, actual_prompt_tokens=0, seconds=0.)
+            usage("advisor", value, advisor=kind)
             return value
         start = time.monotonic()
         response = requests.post(self.url + "/v1/chat/completions", json=body, timeout=self.timeout)
         response.raise_for_status()
         data = response.json()
+        fingerprint = data.get("margent_advisor")
+        if self.identity is not None and fingerprint != self.identity:
+            raise RuntimeError("Advisor identity changed during the stage")
+        if fingerprint is not None:
+            self.identity = fingerprint
         text = data["choices"][0]["message"]["content"]
-        usage = data.get("usage", {})
-        if not isinstance(text, str) or not text.strip() or not usage:
+        counts = data.get("usage", {})
+        if not isinstance(text, str) or not text.strip() or not counts:
             raise RuntimeError("Advisor must return nonempty text and token usage")
-        result = {"text": text, "prompt_tokens": int(usage["prompt_tokens"]),
-                  "completion_tokens": int(usage["completion_tokens"]),
-                  "actual_prompt_tokens": int(usage["prompt_tokens"]),
-                  "actual_completion_tokens": int(usage["completion_tokens"]),
+        result = {"text": text, "prompt_tokens": int(counts["prompt_tokens"]),
+                  "completion_tokens": int(counts["completion_tokens"]),
+                  "actual_prompt_tokens": int(counts["prompt_tokens"]),
+                  "actual_completion_tokens": int(counts["completion_tokens"]),
                   "seconds": time.monotonic() - start, "cache_hit": False,
                   "truncated": data["choices"][0].get("finish_reason") == "length"}
+        usage("advisor", result, advisor=kind, advisor_identity=fingerprint)
         if result["truncated"]:
             raise RuntimeError("Advisor output truncated; increase advisor_max_tokens before collecting labels")
         self.cache[key] = result

@@ -8,6 +8,7 @@ from ..manager.marginal_value import choose_preferred_sequence
 from .answers import correct, extract_final
 from .data import identity
 from .protocol import (FINAL_RULE, KINDS, call_message, messages, parse_calls, tool_schemas)
+from .telemetry import progress
 
 DECIDE = "Review your current candidate. Either commit with a complete solution or request one unused advisor. " + FINAL_RULE
 PROBE = "For this forced-commit probe, use the available evidence and finish your solution without calling tools. " + FINAL_RULE
@@ -31,6 +32,7 @@ def _grade(result, row):
 
 def root_state(row, backend, cfg, seed):
     # Independent solve is also the shared candidate for all interventions.
+    progress(phase="independent", question_hash=identity(row.question))
     root = _draw(backend, messages(row, direct=True), cfg, seed)
     history = messages(row, max_calls=cfg.get("max_depth", 2)) + [{"role": "assistant", "content": candidate(root["text"])},
                                 {"role": "user", "content": DECIDE}]
@@ -44,6 +46,7 @@ def policy_rollout(row, backend, advisors, cfg, seed, root=None, history=None):
     used, costs = [], []
     invalid = None
     for turn in range(cfg.get("max_depth", 2) + 1):
+        progress(phase="policy", policy_turn=turn, sequence=used)
         generated = _draw(backend, history, cfg, seed + 100 + turn, tools=tool_schemas())
         costs.append({"role": "manager", **generated})
         if generated.get("truncated"):
@@ -97,6 +100,7 @@ def collect_one(row, backend, advisors, cfg, seed, evaluate_policy=False):
                 if kind in state["sequence"]:
                     continue
                 seq = state["sequence"] + [kind]
+                progress(phase="counterfactual", sequence=seq, completed_branches=len(branches))
                 call_id = "cf_" + "_".join(seq)
                 msg = call_message(kind, state["draft"], call_id)
                 msg["content"] = ""
@@ -110,6 +114,7 @@ def collect_one(row, backend, advisors, cfg, seed, evaluate_policy=False):
                 steps = state["steps"] + [{"prompt": state["history"], "response": [msg]}]
                 branch = {"sequence": seq, "correct": _grade(revision, row),
                           "valid": revision["valid"], "text": revision["text"],
+                          "truncated": revision.get("truncated", False),
                           "steps": steps, "final_prompt": call_history}
                 branches.append(branch)
                 next_frontier.append({"sequence": seq, "steps": steps, "draft": revision["text"],
@@ -120,6 +125,7 @@ def collect_one(row, backend, advisors, cfg, seed, evaluate_policy=False):
     record = {"question_hash": identity(row.question), "example_id": row.example_id,
               "benchmark_name": row.benchmark_name, "split": row.split,
               "direct_correct": root_correct, "direct_valid": root["valid"],
+              "direct_truncated": root.get("truncated", False),
               "direct_text": root["text"], "base_messages": base,
               "independent_prompt": messages(row, direct=True), "branches": branches,
               "preferred_sequence": list(preferred) if preferred is not None else None,
@@ -129,6 +135,7 @@ def collect_one(row, backend, advisors, cfg, seed, evaluate_policy=False):
         record["policy"] = policy
         record["costs"] += policy["costs"]
         # Equal maximum generated-token allowance: advisor + revision vs self continuation.
+        progress(phase="self_continue")
         self_revision = _draw(backend, base + [{"role": "user", "content": PROBE}], cfg,
                               seed + 500, budget=cfg["max_new_tokens"] + cfg["advisor_max_tokens"])
         record["self_continue_correct"] = _grade(self_revision, row)
