@@ -1,0 +1,26 @@
+{# Fixed prefix-preserving Qwen ChatML template for text-only, non-thinking runs. #}
+{%- for message in messages %}
+{%- if message.role == 'system' %}
+{{- '<|im_start|>system\n' + message.content }}
+{%- if tools %}
+{{- '\nAvailable tools:\n<tools>\n' }}
+{%- for tool in tools %}{{- (tool | tojson) + '\n' }}{%- endfor %}
+{{- '</tools>\nFor a tool call use exactly <tool_call>{"name":"tool_name","arguments":{}}</tool_call>.\n' }}
+{%- endif %}
+{{- '<|im_end|>\n' }}
+{%- elif message.role == 'user' %}
+{{- '<|im_start|>user\n' + message.content + '<|im_end|>\n' }}
+{%- elif message.role == 'assistant' %}
+{{- '<|im_start|>assistant\n<think>\n\n</think>\n\n' + (message.content or '') }}
+{%- for call in message.tool_calls or [] %}
+{%- set fn = call.function if call.function is defined else call %}
+{{- '\n<tool_call>' + ({'name': fn.name, 'arguments': fn.arguments} | tojson) + '</tool_call>' }}
+{%- endfor %}
+{{- '<|im_end|>\n' }}
+{%- elif message.role == 'tool' %}
+{{- '<|im_start|>user\n<tool_response>\n' + message.content + '\n</tool_response><|im_end|>\n' }}
+{%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+{{- '<|im_start|>assistant\n<think>\n\n</think>\n\n' }}
+{%- endif %}

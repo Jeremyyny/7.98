@@ -1,0 +1,20 @@
+{
+  "base_model": "Qwen/Qwen3-0.6B",
+  "advisor_url": "http://127.0.0.1:8000",
+  "seed": 42,
+  "max_depth": 1,
+  "max_new_tokens": 256,
+  "advisor_max_tokens": 512,
+  "max_context": 4096,
+  "max_seq_len": 4096,
+  "temperature": 0.0,
+  "commit_rescue_ratio": -1,
+  "distill_solutions": true,
+  "lora_rank": 8,
+  "sft_max_steps": 2,
+  "sft_accumulation": 1,
+  "rl_max_steps": 2,
+  "rl_max_completion_length": 512,
+  "num_generations": 2,
+  "rl_accumulation": 2
+}
