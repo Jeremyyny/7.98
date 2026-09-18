@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import sys
 import tempfile
 import types
@@ -8,7 +9,7 @@ from pathlib import Path
 
 # The loader tests do not execute model code. Keep them runnable in a minimal
 # data-only environment where PyTorch is not installed.
-if "torch" not in sys.modules:
+if "torch" not in sys.modules and importlib.util.find_spec("torch") is None:
     torch_stub = types.ModuleType("torch")
     torch_stub.manual_seed = lambda _seed: None
     torch_stub.cuda = types.SimpleNamespace(is_available=lambda: False, manual_seed_all=lambda _seed: None)

@@ -28,8 +28,8 @@ class StandardRow:
     benchmark_name: str           # e.g. "medqa"
     task_subtype: str             # e.g. "us_4options"
     question: str
-    choices: Dict[str, str]       # {"A": "...", "B": "...", ...}
-    ground_truth: str             # canonical key matching choices, e.g. "B"
+    choices: Dict[str, str]       # MCQ options; {} for free-response tasks
+    ground_truth: str             # choice key or canonical free-response answer
     context: str = ""             # optional long context (medqa typically empty)
     metadata: Dict[str, Any] = field(default_factory=dict)
     split: str = ""               # "train" | "dev" | "test"

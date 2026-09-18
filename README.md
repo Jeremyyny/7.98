@@ -10,6 +10,7 @@ prefers the shortest one; wrong/no-call trajectories receive no artificial
 advantage.
 
 - **System and pipeline**: [`agent_routing/README.md`](agent_routing/README.md)
+- **Free-response math and RunPod iteration**: [`agent_routing/MATH_RUNPOD.md`](agent_routing/MATH_RUNPOD.md)
 - **Current full experiment plan (data budgets, gates, every command)**:
   [`agent_routing/MARGINAL_VALUE_EXPERIMENTS.md`](agent_routing/MARGINAL_VALUE_EXPERIMENTS.md)
 - **Historical ADC ablation plan**:

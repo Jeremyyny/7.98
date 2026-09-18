@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import random
 
-import numpy as np
-import torch
-
-
 def set_seed(seed: int) -> None:
+    # Data preparation and scoring can import utils without loading a GPU stack.
+    import numpy as np
+    import torch
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
