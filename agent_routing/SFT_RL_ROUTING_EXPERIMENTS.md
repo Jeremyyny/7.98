@@ -154,7 +154,7 @@ accelerate launch --config_file configs/accelerate_zero3.yaml \
   --mgr_use_wandb \
   --wandb_project agent_routing \
   --wandb_run_name medqa_9b_sftgrpo_full_l003 \
-  --task_description 'You are a manager agent solving medical multiple-choice questions.' \
+  --task_description 'You are a manager agent solving multiple-choice questions.' \
   2>&1 | tee logs/medqa_9b_sftgrpo_full_l003.log
 ```
 
@@ -198,7 +198,7 @@ accelerate launch --config_file configs/accelerate_zero3.yaml \
   --mgr_use_wandb \
   --wandb_project agent_routing \
   --wandb_run_name medqa_9b_sftgrpo_route_l003 \
-  --task_description 'You are a manager agent solving medical multiple-choice questions.' \
+  --task_description 'You are a manager agent solving multiple-choice questions.' \
   2>&1 | tee logs/medqa_9b_sftgrpo_route_l003.log
 ```
 
@@ -231,7 +231,7 @@ CUDA_VISIBLE_DEVICES=1 python -u -X utf8 -m src.pipeline.cli eval_manager_tools 
   --eval_max_new_tokens 1024 \
   --eval_max_tool_calls 3 \
   --subagent_server_url http://localhost:8000 \
-  --task_description 'You are a manager agent solving medical multiple-choice questions.' \
+  --task_description 'You are a manager agent solving multiple-choice questions.' \
   2>&1 | tee logs/medqa_9b_sftgrpo_full_l003_eval.log
 ```
 
@@ -252,7 +252,7 @@ CUDA_VISIBLE_DEVICES=1 python -u -X utf8 -m src.pipeline.cli eval_manager_tools 
   --eval_max_new_tokens 1024 \
   --eval_max_tool_calls 3 \
   --subagent_server_url http://localhost:8000 \
-  --task_description 'You are a manager agent solving medical multiple-choice questions.' \
+  --task_description 'You are a manager agent solving multiple-choice questions.' \
   2>&1 | tee logs/medqa_9b_sftgrpo_route_l003_eval.log
 ```
 

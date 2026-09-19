@@ -37,7 +37,7 @@ CRITICAL RULES:
 1. Output ONLY valid JSON. No prose, no markdown fences.
 2. Do NOT state, hint, or imply which answer choice is correct.
 3. When choices are present, your evidence and facts must be useful for evaluating ALL choices, not selectively favor any one.
-4. If context is empty (closed-book), set key_evidence=[] and use extracted_facts to enumerate concrete pieces of information FROM THE QUESTION STEM (e.g. "patient age 45", "contract was signed before delivery", "reaction occurs at 300 K", "array is sorted in ascending order").
+4. If context is empty (closed-book), set key_evidence=[] and use extracted_facts to enumerate concrete pieces of information FROM THE QUESTION STEM (e.g. "the sequence contains 45 elements", "contract was signed before delivery", "reaction occurs at 300 K", "array is sorted in ascending order").
 5. extracted_facts entries must be self-contained and de-contextualized (a separate agent will read them without seeing the original question).
 6. Polarity is relative to the QUESTION's directional claim, not to any choice. If unclear, use "neutral".
 7. Keep each text field under the schema's character limits.

@@ -24,6 +24,7 @@ Benchmarks: **MedQA-USMLE**, **LegalBench**, **MMLU-Pro**, **GPQA**,
 > The older ADC experiment matrix is retained in `EXPERIMENTS.md` for history.
 > This README covers the system + one end-to-end walkthrough per benchmark.
 > AQuA-RAT and ARC-Challenge commands: **[AQUA_ARC_BENCHMARKS.md](AQUA_ARC_BENCHMARKS.md)**.
+> Subagent prompt entry points, version changes, and math measurement coverage: **[SUBAGENT_PROMPTS.md](SUBAGENT_PROMPTS.md)**.
 
 ---
 
@@ -107,7 +108,7 @@ export BASE_MODEL=Qwen/Qwen3-8B
 export TEACHER_ID=commit_gpt_8b
 export PROVIDER=openai MODEL=gpt-4o
 export MEDQA_CACHE=outputs/data/medqa_us4_normalized.jsonl
-export TASK_DESC="You are a manager agent solving USMLE-style medical multiple-choice questions."
+export TASK_DESC="You are a manager agent solving multiple-choice questions."
 export SPLIT="--train_size 1400 --dev_size 200 --test_size 500"
 
 # 1) data

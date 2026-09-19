@@ -13,18 +13,19 @@ from typing import Dict, List
 
 _REASONER_TEACHER_SYSTEM = """You are an expert annotator producing training data for a small Reasoner sub-agent.
 
-The Reasoner's job is to convert a medical multiple-choice question into a SHORT STRUCTURED SCAFFOLD. Another model, the manager, will use the scaffold to decide. The Reasoner itself MUST NEVER state or imply the final answer.
+The Reasoner's job is to convert a question into a SHORT STRUCTURED SCAFFOLD using the subject matter of the question. Another model, the manager, will use the scaffold to decide. The Reasoner itself MUST NEVER state or imply the final answer.
 
 You will be given:
 - A QUESTION
-- CHOICES, always present in this multiple-choice setting
+- CHOICES, if this is a multiple-choice question
+- A CONTEXT, which may be empty
 
 Return ONLY a valid JSON object with this schema:
 {
-  "case_facts": ["<short factual detail from the case>"],
-  "task_type": "<short category such as diagnosis, therapy_selection, risk_factor, mechanism, next_step, prevention, adverse_effect, prognosis, or other>",
+  "case_facts": ["<short fact or constraint from the question or context>"],
+  "task_type": "<short category such as classification, comparison, calculation, causal_reasoning, rule_application, or other>",
   "decision_factors": ["<neutral factor the manager should evaluate>"],
-  "knowledge_slots": ["<compact medical knowledge slot needed to evaluate the case>"],
+  "knowledge_slots": ["<compact concept, principle, formula, or rule needed to evaluate the problem>"],
   "candidate_considerations": [
     {
       "choice_key": "<choice key, e.g. A>",
@@ -40,7 +41,7 @@ CRITICAL RULES:
 1. Output ONLY valid JSON. No prose, no markdown fences.
 2. Keep the whole response short, usually 250-500 tokens.
 3. Do NOT identify the final answer. Never write phrases like "the answer is", "correct answer", "best choice", "we conclude", "therefore choose", or equivalent.
-4. candidate_considerations MUST contain one entry for EVERY choice key. It is OK to write choice_key values only inside the choice_key field.
+4. When choices are provided, candidate_considerations MUST contain one entry for EVERY choice key. It is OK to write choice_key values only inside the choice_key field. If no choices are provided, set candidate_considerations=[]; do not invent choices.
 5. Use relevant_if / less_relevant_if, not support / against. Keep every entry neutral and conditional.
 6. Do not copy a full answer-choice text into prose. Use general criteria, mechanisms, or conditions instead.
 7. Do not make one option obviously stronger than all others.

@@ -7,13 +7,13 @@ import re
 KINDS = ("extractor", "reasoner", "verifier")
 FINAL_RULE = r"End with exactly one final line: FINAL_ANSWER: \boxed{your answer}."
 SYSTEM = """You solve free-response mathematics problems. Show your mathematical reasoning.
-You can commit to your solution or request help from three frozen advisors:
+You can commit to your solution or request help from three frozen sub-agents:
 extractor_tool identifies constraints; reasoner_tool suggests a solution approach;
-verifier_tool audits your full current derivation. A verifier advisor is a fallible
+verifier_tool audits your full current derivation. The verifier sub-agent is a fallible
 language model, not the answer-grading program.
-Use native tool calls, at most one call per turn and each advisor at most once.
+Use native tool calls, at most one call per turn and each sub-agent at most once.
 Before a call, write your current derivation. For verifier_tool pass that complete
-derivation as current_draft. Stop when another advisor is unlikely to help.
+derivation as current_draft. Stop when another sub-agent is unlikely to help.
 Never put a FINAL_ANSWER line in a turn that calls a tool.
 """ + FINAL_RULE
 DIRECT_SYSTEM = "Solve the mathematics problem independently. Show your reasoning. " + FINAL_RULE
@@ -22,7 +22,7 @@ DIRECT_SYSTEM = "Solve the mathematics problem independently. Show your reasonin
 def messages(row, direct=False, max_calls=3):
     # Explicit allowlist: labels, source solutions and metadata never enter prompts.
     question = row.question + ("\nContext:\n" + row.context if row.context else "")
-    system = DIRECT_SYSTEM if direct else SYSTEM + f"\nYour total advisor-call budget is {max_calls}."
+    system = DIRECT_SYSTEM if direct else SYSTEM + f"\nYour total sub-agent-call budget is {max_calls}."
     return [{"role": "system", "content": system},
             {"role": "user", "content": question}]
 
@@ -31,13 +31,13 @@ def tool_schemas():
     result = []
     for kind in KINDS:
         properties = ({"current_draft": {"type": "string", "description":
-                       "Your full current mathematical derivation, including candidate answer."}}
+                       "Your full current reasoning, including candidate answer."}}
                       if kind == "verifier" else {})
         result.append({"type": "function", "function": {
             "name": kind + "_tool", "description": {
-                "extractor": "Extract the mathematical givens and constraints.",
-                "reasoner": "Suggest a mathematical solution approach.",
-                "verifier": "Audit the current derivation for mathematical errors."}[kind],
+                "extractor": "Extract the stated facts and constraints.",
+                "reasoner": "Suggest a solution approach using relevant principles.",
+                "verifier": "Audit the current reasoning for errors."}[kind],
             "parameters": {"type": "object", "properties": properties,
                            "required": ["current_draft"] if kind == "verifier" else []}}})
     return result
@@ -81,10 +81,10 @@ def parse_calls(text):
 def advisor_messages(kind, row, draft):
     instructions = {
         "extractor": "Extract givens, constraints, variables and useful equivalent formulations.",
-        "reasoner": "Develop a useful solution approach with intermediate mathematical deductions.",
+        "reasoner": "Develop a useful solution approach with intermediate deductions based on relevant principles.",
         "verifier": "Audit the supplied derivation. Identify specific invalid steps and suggest repairs.",
     }
-    return [{"role": "system", "content": "You are a mathematical advisor. " + instructions[kind]
+    return [{"role": "system", "content": "You are a reasoning sub-agent. Use the subject matter of the supplied question. " + instructions[kind]
              + " Give concise concrete help. You have no answer key. Do not use tools."},
             {"role": "user", "content": row.question +
              ("\nContext:\n" + row.context if row.context else "") +

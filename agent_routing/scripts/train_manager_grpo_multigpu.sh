@@ -24,7 +24,7 @@
 #       --mgr_use_wandb \
 #       --wandb_project agent_routing \
 #       --wandb_run_name openai_us4_500_runtime_raw_grpo_full \
-#       --task_description "You are a manager agent solving USMLE-style medical multiple-choice questions."
+#       --task_description "You are a manager agent solving multiple-choice questions."
 
 set -e
 
