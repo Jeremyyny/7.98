@@ -109,7 +109,7 @@ class WandbTracker:
         self.run.define_metric("trainer_step")
         self.run.define_metric("train/*", step_metric="trainer_step")
         self.run.define_metric("diagnostic_step")
-        for pattern in ("eval/*", "internalization/*"):
+        for pattern in ("eval/*", "internalization/*", "delegation/*"):
             self.run.define_metric(pattern, step_metric="diagnostic_step")
         self.run.summary.update({"attempt": self.attempt, "status": "running"})
         url = self.run.url if self.mode == "online" else None

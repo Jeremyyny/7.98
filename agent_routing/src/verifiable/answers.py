@@ -71,7 +71,13 @@ def equivalent(prediction: str | None, gold: str) -> bool:
         return pn == gn
     # Missing dependencies are setup errors, not silently wrong answers.
     from math_verify import verify
-    return bool(verify(_parse(g), _parse(p)))
+    gold_parsed, pred_parsed = _parse(g), _parse(p)
+    # Do not let decimal rounding accept a near-miss integer/fraction wrapped
+    # in LaTeX (the plain-number path above is exact as well).
+    from sympy import Float, Rational
+    if len(gold_parsed) == len(pred_parsed) == 1 and all(isinstance(x, (Rational, Float)) for x in (gold_parsed[0], pred_parsed[0])):
+        return Rational(str(gold_parsed[0])) == Rational(str(pred_parsed[0]))
+    return bool(verify(gold_parsed, pred_parsed))
 
 
 def correct(text: str, gold: str) -> bool:

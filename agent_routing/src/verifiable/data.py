@@ -48,7 +48,8 @@ def normalize(rec, source, index):
     if source == "numina":
         if rec.get("problem_is_valid") != "Yes" or rec.get("solution_is_valid") != "Yes":
             return None
-        if rec.get("question_type") == "proof" or rec.get("choices"):
+        qtype = str(rec.get("question_type", "")).lower().replace("_", "-").replace(" ", "-")
+        if qtype in {"proof", "multiple-choice", "mcq"} or rec.get("choices"):
             return None
     # Text-only pipeline: do not silently drop required figures.
     if re.search(r"!\[.*?\]\(|<img\b", question, re.I):
@@ -65,6 +66,8 @@ def normalize(rec, source, index):
 
 def partition(rows, excluded, train_size, dev_size, seed):
     """Dedup BEFORE splitting; remove normalized exact matches with either test."""
+    if train_size < 1 or dev_size < 1:
+        raise ValueError("Train and dev splits must be nonempty")
     unique, seen, counts = [], set(excluded), Counter()
     for row in rows:
         key = identity(row.question)
@@ -103,8 +106,10 @@ def load_rows(path, required_split=None):
 
 def prepare(out_dir, train_size=1024, dev_size=256, seed=42, scan_limit=30000,
             local_sources=None):
+    if min(train_size, dev_size, scan_limit) < 1:
+        raise ValueError("train_size, dev_size and scan_limit must be positive")
     out = Path(out_dir)
-    if (out / "manifest.json").exists():
+    if out.exists() and any(out.iterdir()):
         raise FileExistsError("Prepared data already exists; use another directory to change splits")
     out.mkdir(parents=True, exist_ok=True)
     local_sources = local_sources or {}
@@ -177,4 +182,17 @@ def verify_manifest(data_dir):
     for filename, expected in manifest["sha256"].items():
         if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
             raise ValueError(f"Data changed after preparation: {filename}")
+    expected = {"train.jsonl", "dev.jsonl"} if manifest.get("smoke_only") else {"train.jsonl", "dev.jsonl", "aime2026.jsonl", "beyondaime.jsonl"}
+    if set(manifest["sha256"]) != expected:
+        raise ValueError("Manifest must include exactly the required split files")
+    seen = set()
+    for filename in sorted(expected):
+        name = filename.removesuffix(".jsonl")
+        rows = load_rows(root / filename, required_split=name if name in {"train", "dev"} else "test")
+        keys = {identity(row.question) for row in rows}
+        if seen & keys:
+            raise ValueError("Question overlap between frozen data splits")
+        seen.update(keys)
+        if manifest.get("counts") and manifest["counts"].get(name) != len(rows):
+            raise ValueError("Manifest count differs from data rows")
     return manifest

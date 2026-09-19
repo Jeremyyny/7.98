@@ -1,9 +1,10 @@
-"""LoRA continuation, complete-solution SFT, and native-tool GRPO."""
+"""Protocol-v2 LoRA SFT, with an inactive legacy GRPO implementation."""
 from __future__ import annotations
 
 from pathlib import Path
 import hashlib
 import inspect
+import os
 import json
 import time
 
@@ -17,30 +18,32 @@ from .telemetry import Monitor, progress, usage, training_callback, metrics
 
 
 def tokenize_turn(row, tok, max_seq_len):
-    schemas = None if row.get("decision_type") == "independent_solution" else tool_schemas()
+    schemas = tool_schemas() if row.get("decision_type") in {"call", "commit"} else None
     prompt = render(tok, row["prompt"], schemas)
     full = render(tok, row["prompt"] + row["response"], schemas, generation=False)
+    if not full.startswith(prompt):
+        raise ValueError("Chat template is not prefix preserving; refusing incorrect loss masking")
+    # Keep exactly the tokens supplied at inference. Joint tokenization can merge
+    # the prompt's trailing whitespace with the response's leading whitespace
+    # (notably Qwen3.5 tool calls), changing a prompt token into a target token.
     pids = tok(prompt, add_special_tokens=False)["input_ids"]
-    ids = tok(full, add_special_tokens=False)["input_ids"]
+    target_ids = tok(full[len(prompt):], add_special_tokens=False)["input_ids"]
+    ids = pids + target_ids
     if len(ids) > max_seq_len:
         return None  # drop and report; do not train on truncated solutions
-    prefix = 0
-    for a, b in zip(pids, ids):
-        if a != b:
-            break
-        prefix += 1
-    if prefix >= len(ids):
+    if not target_ids:
         return None
     return {"input_ids": ids, "attention_mask": [1] * len(ids),
-            "labels": [-100] * prefix + ids[prefix:]}
+            "labels": [-100] * len(pids) + target_ids}
 
 
 def _training_output(path, config, checkpoint, data_path, stage):
     from transformers.trainer_utils import get_last_checkpoint
     from .runner import checkpoint_identity
+    from .provenance import harness_identity
     output = Path(path)
     output.mkdir(parents=True, exist_ok=True)
-    signature = {"config": config, "checkpoint": checkpoint_identity(checkpoint), "stage": stage,
+    signature = {"harness": harness_identity(), "config": config, "checkpoint": checkpoint_identity(checkpoint), "stage": stage,
                  "data_sha256": hashlib.sha256(Path(data_path).read_bytes()).hexdigest()}
     manifest = output / "training_run.json"
     if manifest.exists():
@@ -50,31 +53,42 @@ def _training_output(path, config, checkpoint, data_path, stage):
         raise FileExistsError("Training directory has no matching run manifest")
     else:
         write_json(str(manifest), signature)
-    complete = (output / "training_metrics.json").exists() and (output / "adapter_config.json").exists()
+    complete = ((output / "training_metrics.json").exists() and (output / "adapter_config.json").exists()
+                and any((output / name).exists() for name in ("adapter_model.safetensors", "adapter_model.bin")))
     return complete, get_last_checkpoint(str(output))
 
 
 def train_sft(config, checkpoint, data_path, output):
+    if int(os.environ.get("WORLD_SIZE", "1")) != 1:
+        raise ValueError("Paper SFT runs use one Manager training process; do not use torchrun")
     import torch
     from datasets import Dataset
     from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments, set_seed
+    if config.get("sft_max_steps", -1) <= 0:
+        raise ValueError("Set a positive sft_max_steps shared across comparison arms")
     finished, resume_checkpoint = _training_output(output, config, checkpoint, data_path, "sft")
     if finished:
         return
     with Monitor(output, "sft"):
         set_seed(config["seed"])
         tok, model = load_model(config["base_model"], checkpoint, trainable=True,
-                                lora_rank=config.get("lora_rank", 16))
+                                lora_rank=config.get("lora_rank", 16), revision=config.get("base_model_revision"))
         progress(phase="preparing_sft_data")
         rows = read_jsonl(data_path)
+        if any(r.get("split") != "train" or r.get("protocol_version") != 2 for r in rows):
+            raise ValueError("SFT requires protocol-v2 train-only rows exported by collect")
         features = [tokenize_turn(row, tok, config["max_seq_len"]) for row in rows]
         kept = [f for f in features if f is not None]
+        if len(kept) != len(features):
+            raise ValueError("SFT targets exceed max_seq_len or have no supervised tokens; fix the pilot configuration instead of dropping examples")
         if not kept:
-            raise ValueError("No complete SFT targets fit max_seq_len")
+            raise ValueError("No successful SFT targets")
         report = {"input_turns": len(rows), "kept_turns": len(kept), "dropped_turns": len(rows) - len(kept),
                   "input_tokens_per_epoch": sum(len(f["input_ids"]) for f in kept),
                   "supervised_tokens_per_epoch": sum(sum(y != -100 for y in f["labels"]) for f in kept),
-                  "checkpoint": checkpoint, "data": data_path}
+                  "checkpoint": checkpoint, "data": data_path,
+                  "optimizer_step_budget": config["sft_max_steps"],
+                  "budget_scope": "matched optimizer updates and accumulation; actual tokens reported, not equal FLOPs"}
         write_json(str(Path(output) / "sft_data_report.json"), report)
         metrics(report, "sft_data")
         print(report, flush=True)
@@ -104,7 +118,7 @@ def train_sft(config, checkpoint, data_path, output):
         trainer.save_model(output)
         tok.save_pretrained(output)
         write_json(str(Path(output) / "training_metrics.json"),
-                   {**result.metrics, "wall_seconds": time.monotonic() - start, "config": config})
+                   {**result.metrics, "optimizer_steps": trainer.state.global_step, "wall_seconds": time.monotonic() - start, "config": config})
 
 
 def make_environment(rows, advisors, max_calls):
@@ -134,7 +148,7 @@ def make_environment(rows, advisors, max_calls):
             return response["text"]
 
         def extractor_tool(self) -> str:
-            """Extract the mathematical givens and constraints.
+            """Extract the stated facts and constraints.
 
             Returns:
                 Advice on the current problem.
@@ -142,7 +156,7 @@ def make_environment(rows, advisors, max_calls):
             return self._call("extractor")
 
         def reasoner_tool(self) -> str:
-            """Suggest a mathematical solution approach.
+            """Suggest a solution approach using relevant principles.
 
             Returns:
                 Advice on the current problem.
@@ -150,10 +164,10 @@ def make_environment(rows, advisors, max_calls):
             return self._call("reasoner")
 
         def verifier_tool(self, current_draft: str) -> str:
-            """Audit the current derivation for mathematical errors.
+            """Audit the supplied reasoning for errors.
 
             Args:
-                current_draft: Your full current mathematical derivation, including candidate answer.
+                current_draft: Your full current reasoning, including candidate answer.
 
             Returns:
                 An audit of the supplied derivation.
@@ -198,6 +212,10 @@ def reward_function(trace_path):
 
 
 def train_rl(config, checkpoint, data_path, output):
+    raise NotImplementedError("The legacy GRPO environment does not implement protocol-v2 immutable COMMIT. Use dynamic_sft, success_sft or static_sft for the paper experiment.")
+
+
+def _legacy_train_rl(config, checkpoint, data_path, output):
     import torch
     from datasets import Dataset
     from transformers import set_seed
@@ -213,7 +231,7 @@ def train_rl(config, checkpoint, data_path, output):
         set_seed(config["seed"])
         rows = load_rows(data_path, required_split="train")
         tok, model = load_model(config["base_model"], checkpoint, trainable=True,
-                                lora_rank=config.get("lora_rank", 16))
+                                lora_rank=config.get("lora_rank", 16), revision=config.get("base_model_revision"))
         backend = HFBackend.__new__(HFBackend)
         backend.tokenizer, backend.model, backend.max_context = tok, model, config["max_context"]
         model.eval()

@@ -80,7 +80,7 @@ class PaperReportTest(unittest.TestCase):
             out = Path(tmp) / "paper"
             result = generate_report([root], out, demo=True)
             self.assertEqual(result["main_rows"], 4)
-            self.assertEqual(len(result["figures"]), 5)
+            self.assertEqual(len(result["figures"]), 6)
             self.assertNotIn("search_pct", (out / "main_results.csv").read_text())
             self.assertIn("SYNTHETIC", (out / "README.md").read_text())
             self.assertTrue((out / "paper_main.tex").exists())
