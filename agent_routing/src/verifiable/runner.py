@@ -15,7 +15,7 @@ from ..utils.io import append_jsonl, read_jsonl, write_json, write_jsonl
 from .backend import HFBackend, HTTPAdvisors
 from .data import identity, load_rows, verify_manifest
 from .experiment import collect_one, compare, policy_rollout, root_state, sft_rows, summary
-from .telemetry import Monitor, atomic_json, progress, metrics
+from .telemetry import Monitor, atomic_json, completed_question, question_context, progress, metrics
 from .protocol import PROTOCOL_VERSION
 from .provenance import harness_identity
 from .analysis import conditional_metrics
@@ -101,6 +101,7 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
                     advisors.identity = frozen
         started = time.monotonic()
         for row in pending:
+            question_context(row)
             progress(completed_examples=len(records), total_examples=len(rows), question_hash=identity(row.question))
             seed = (cfg.get("generation_seed", 1234) + int(identity(row.question)[:8], 16)) % (2 ** 31)
             if mode == "evaluate":
@@ -115,9 +116,11 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
                           "costs": [{"role": "manager", **direct}] + policy["costs"]}
             else:
                 record = collect_one(row, backend, advisors, cfg, seed, evaluate_policy=mode == "diagnose")
+            record.update(question=row.question, context=row.context)
             atomic_json(shards / (record["question_hash"] + ".json"), record)
             append_jsonl(str(path), [record])
             records.append(record)
+            completed_question(record)
             progress(completed_examples=len(records), total_examples=len(rows))
             print(f"[{mode}] {len(records)}/{len(rows)} direct={record['direct_correct']}", flush=True)
         result = summary(records)

@@ -1,7 +1,8 @@
-"""Optional scalar-only W&B tracking with persistent stage identities.
+"""Optional W&B metrics and explicitly enabled text tables with stage identities.
 
 Enable explicitly with MARGENT_WANDB_MODE=online or offline. Local experiment
-records remain authoritative; this module never uploads trajectories or weights.
+records remain authoritative. MARGENT_WANDB_TEXT=1 enables output tables;
+model weights are never uploaded by this module.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import re
+import time
 import uuid
 
 
@@ -19,6 +21,10 @@ def tracking_mode():
     if mode not in {"online", "offline", "disabled"}:
         raise ValueError("MARGENT_WANDB_MODE must be online, offline, or disabled")
     return mode
+
+
+def text_tracking_enabled():
+    return os.environ.get("MARGENT_WANDB_TEXT", "0").lower() in {"1", "true", "yes"}
 
 
 def scalar_metrics(values, prefix=""):
@@ -59,6 +65,9 @@ class WandbTracker:
         self.root = Path(root).resolve()
         self.stage, self.attempt = stage, attempt
         self.mode = tracking_mode()
+        self.text_enabled = text_tracking_enabled()
+        self.tables, self.table_counts, self.pending_tables = {}, {}, set()
+        self.last_table_flush = None
 
     def start(self):
         if self.mode == "disabled":
@@ -67,6 +76,12 @@ class WandbTracker:
             wandb = import_module("wandb")
         except ImportError as exc:
             raise RuntimeError("W&B requested but not installed; install requirements-math.txt") from exc
+        self.sdk = wandb
+        if self.text_enabled:
+            self.table_max_rows = int(os.environ.get("MARGENT_WANDB_TABLE_MAX_ROWS", "10000"))
+            self.table_max_chars = int(os.environ.get("MARGENT_WANDB_TABLE_MAX_CHARS", "20000"))
+            if self.table_max_rows < 1 or self.table_max_chars < 256:
+                raise ValueError("W&B table limits require MAX_ROWS >= 1 and MAX_CHARS >= 256")
         project = os.environ.get("WANDB_PROJECT", "margent-math-rsi")
         entity = os.environ.get("WANDB_ENTITY")
         if not entity:
@@ -112,6 +127,7 @@ class WandbTracker:
         for pattern in ("eval/*", "internalization/*", "delegation/*"):
             self.run.define_metric(pattern, step_metric="diagnostic_step")
         self.run.summary.update({"attempt": self.attempt, "status": "running"})
+        self.run.summary.update({"debug/text_logging": self.text_enabled})
         url = self.run.url if self.mode == "online" else None
         link = {**identity, "active_id": run_id, "mode": self.mode, "url": url,
                 "attempt": self.attempt}
@@ -126,7 +142,50 @@ class WandbTracker:
                 # from the last saved checkpoint without dropping new records.
                 self.run.log(clean)
 
+    def log_text(self, kind, record):
+        if self.run is None or not self.text_enabled:
+            return
+        from .debug_records import (GENERATION_COLUMNS, QUESTION_COLUMNS,
+                                    generation_values, question_values, table_row)
+        if kind == "generation":
+            columns, values = GENERATION_COLUMNS, generation_values(record)
+        elif kind == "question":
+            columns, values = QUESTION_COLUMNS, question_values(record, record.get("source", "live"))
+        else:
+            raise ValueError(f"Unknown text table: {kind}")
+        # SDK incremental tables do not resume their in-memory cursor. Separate
+        # attempts keep earlier rows visible instead of replacing them on resume.
+        key = f"debug/{kind}s_{self.attempt}"
+        count = self.table_counts.get(key, 0)
+        if count >= self.table_max_rows:
+            self.run.summary[key + "_omitted_rows"] = self.run.summary.get(key + "_omitted_rows", 0) + 1
+            if count == self.table_max_rows:
+                print(f"[wandb] {key} reached its display row limit; full records remain local", flush=True)
+            self.table_counts[key] = count + 1
+            return
+        if key not in self.tables:
+            self.tables[key] = self.sdk.Table(columns=columns, log_mode="INCREMENTAL")
+            self.run.summary["debug/table_keys"] = list(self.tables)
+        self.tables[key].add_data(*table_row(columns, values, self.table_max_chars))
+        self.table_counts[key] = count + 1
+        self.pending_tables.add(key)
+        self.flush_tables(force=bool(record.get("truncated") or record.get("error")))
+
+    def flush_tables(self, force=False):
+        if not self.pending_tables or (not force and self.last_table_flush is not None
+                                       and time.monotonic() - self.last_table_flush < 30):
+            return
+        keys = sorted(self.pending_tables)
+        self.run.log({key: self.tables[key] for key in keys})
+        self.pending_tables.difference_update(keys)
+        self.last_table_flush = time.monotonic()
+
     def finish(self, status):
         if self.run:
-            self.run.summary.update(status=status)
-            self.run.finish(exit_code=0 if status == "completed" else 1)
+            try:
+                self.flush_tables(force=True)
+            finally:
+                try:
+                    self.run.summary.update({"status": status})
+                finally:
+                    self.run.finish(exit_code=0 if status == "completed" else 1)

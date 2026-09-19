@@ -14,5 +14,5 @@ fi
 "$MARGENT_VENV/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable after installation"'
 "$MARGENT_VENV/bin/python" -m pip freeze > "$MARGENT_RUN_ROOT/environment.lock.txt"
 nvidia-smi > "$MARGENT_RUN_ROOT/nvidia-smi.txt"
-MARGENT_WANDB_MODE=disabled "$MARGENT_VENV/bin/python" -m pytest -q tests/test_verifiable.py tests/test_math_reporting.py tests/test_math_wandb.py tests/test_math_paper_protocol.py tests/test_marginal_value.py tests/test_benchmark_loaders.py tests/test_routing_anchor.py
+MARGENT_WANDB_MODE=disabled "$MARGENT_VENV/bin/python" -m pytest -q tests/test_verifiable.py tests/test_math_reporting.py tests/test_math_wandb.py tests/test_math_wandb_tables.py tests/test_math_paper_protocol.py tests/test_marginal_value.py tests/test_benchmark_loaders.py tests/test_routing_anchor.py
 printf 'Ready. Activate with: source %s/bin/activate\n' "$MARGENT_VENV"

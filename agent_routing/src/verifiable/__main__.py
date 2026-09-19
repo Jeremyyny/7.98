@@ -79,6 +79,9 @@ def main():
     check.add_argument("--out", default="environment_report.json")
     wb = sub.add_parser("wandb-check", help="Check W&B login/logging without a GPU or model")
     wb.add_argument("--out", required=True)
+    review = sub.add_parser("wandb-upload-records", help="Review saved stage outputs in W&B without a model or GPU")
+    review.add_argument("--run-dir", required=True, help="Stage directory containing records.jsonl or generations.jsonl")
+    review.add_argument("--out", required=True, help="New review directory outside the source experiment")
     for name in ("collect", "diagnose", "evaluate", "sft", "rl"):
         sp = sub.add_parser(name)
         sp.add_argument("--config", required=True)
@@ -150,6 +153,9 @@ def main():
         with Monitor(root, "tracking_check"):
             metrics({"logging_check": 1}, "check")
         result = json.loads((root / "wandb_link.json").read_text())
+    elif args.command == "wandb-upload-records":
+        from .debug_records import upload_records
+        result = upload_records(args.run_dir, args.out)
     elif args.command == "status":
         from .telemetry import status_snapshot
         result = status_snapshot(args.run_dir)

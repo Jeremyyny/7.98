@@ -37,12 +37,67 @@ git rev-parse HEAD > "$MARGENT_RUN_ROOT/code_commit.txt"
 export MARGENT_WANDB_MODE=online
 export WANDB_PROJECT=margent-math-rsi
 export WANDB_ENTITY=你的WandB用户名或团队名
+# 需要在自己的 W&B 项目里查看题目、正确答案、输入消息和模型原文时开启：
+export MARGENT_WANDB_TEXT=1
 wandb login
 python -m src.verifiable wandb-check --out "$MARGENT_RUN_ROOT/wandb-check"
 ```
 
 `wandb login` 在终端交互输入 API key，不要把 key 写进 Git。离线记录可用 `MARGENT_WANDB_MODE=offline`，完成后 `wandb sync` 对应目录；完全不用则设为 `disabled`。
-每个实验有一个 group，各训练/采集阶段有单独 run。`wandb_link.json` 保存链接；原始逐题数据不上传 W&B。
+每个实验有一个 group，各训练/采集阶段有单独 run。`wandb_link.json` 保存链接。
+默认只上传指标和配置；`MARGENT_WANDB_TEXT=1` 额外上传逐题原文表格，模型权重仍不上传。
+在 `initial_dev`、`collection`、`sft_dev` 或外部评估的 stage run 中查看：
+
+| W&B Table 前缀 | 内容 |
+| --- | --- |
+| `debug/questions_` | 已完成题目的题目、正确答案、独立回答、正确/有效/截断标记、分支成功数、策略回答与判定、自我修改回答、token 和生成耗时合计 |
+| `debug/generations_` | 每次 Manager/advisor 生成的输入消息、回答、角色、当前阶段、委托序列、截断/错误、token 上限、实际 token、耗时与生成速度 |
+
+表格名后缀是本次 attempt ID。恢复同一在线 run 时使用新后缀，旧表仍留在该 run 中。
+表格使用增量上传：首条立即提交，之后约每 30–40 秒、每题结束或退出时提交；advisor 截断时立即提交。
+`status=running` 的心跳不等于生成取得进展；用生成表的实际输出、token 和秒数判断。
+`tokens_per_second` 包含单次调用的提示处理等时间，是观测吞吐，不能当作纯解码速度；缓存命中时不虚报实际生成 token。
+每张表每个 attempt 默认最多 10000 行、每个文本字段最多 20000 字符；可用
+`MARGENT_WANDB_TABLE_MAX_ROWS` / `MARGENT_WANDB_TABLE_MAX_CHARS` 调整。
+被裁剪的字段在 `clipped_fields` 标出，超出行数在 run summary 的 `*_omitted_rows` 计数。
+完整的逐次生成（包括截断的 advisor 输出）先写入 stage 目录的 `generations.jsonl`，与上传开关无关。
+上传故障保留本地文件并继续原有实验流程；advisor 截断仍按原规则中止，不会被当成正确训练数据。
+
+### 在 W&B 查看之前已经保存的结果
+
+这个命令只读取旧结果，不加载模型、不运行 GPU、不修改旧实验。旧版本没有记录的失败回答无法补回。
+`--run-dir` 指向具体 stage（例如 `initial_dev`），`--out` 必须是实验 loop 外的全新目录。
+
+```bash
+export MARGENT_WANDB_MODE=online
+export MARGENT_WANDB_TEXT=1
+python -m src.verifiable wandb-upload-records \
+  --run-dir /workspace/margent-runs-v2/smoke-loop/initial_dev \
+  --out "/workspace/margent-runs-v2/wandb-text-review-$(date +%Y%m%d-%H%M%S)"
+```
+
+打开命令打印的新 review run 链接，查看上述两类表。旧版 `records.jsonl` 的 `costs` 可补传回答和耗时，
+未保存的输入消息、阶段和序列保留为空；`source=legacy_costs` 明确标识这些恢复的行。
+新版本的 `generations.jsonl` 则可补传没有完成整道题就失败的输出。
+review 配置记录原运行配置、原 harness 标识及源文件 SHA256，不重新计算标签或覆盖原 run。
+
+### 更新代码后的运行目录
+
+这次更新改变了 harness 源码标识。补传旧结果不受影响；继续计算时需要重启 advisor，使两端运行同一版代码，
+并使用新的 loop/pilot 输出目录，不能用新代码对旧 loop 执行 `--resume`。
+模型缓存和准备好的数据可以继续使用。例：在新终端中激活环境、设置 HF/W&B 环境变量，停止旧 advisor 后：
+
+```bash
+export MARGENT_RUN_ROOT=/workspace/margent-runs-v2-tables
+mkdir -p "$MARGENT_RUN_ROOT"
+cp -n /workspace/margent-runs-v2/frozen_math.json "$MARGENT_RUN_ROOT/frozen_math.json"
+cp -n /workspace/margent-runs-v2/frozen_smoke_9b.json "$MARGENT_RUN_ROOT/frozen_smoke_9b.json"
+git rev-parse HEAD > "$MARGENT_RUN_ROOT/code_commit.txt"
+export MARGENT_SMOKE_CONFIG="$MARGENT_RUN_ROOT/frozen_smoke_9b.json"
+```
+
+按下文第 5 步重新启动 advisor，再跑 smoke。启用表格本身不会解决此前的截断问题；
+即使仍失败，新版本也会保留该次 advisor 原文供排查。调整 token 预算或 prompt 后仍须使用新的运行目录。
 
 ## 4. 准备数据与固定模型版本
 
