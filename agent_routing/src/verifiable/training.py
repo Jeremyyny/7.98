@@ -13,7 +13,7 @@ from .backend import HTTPAdvisors, load_model, render
 from .data import identity, load_rows
 from .experiment import root_state
 from .protocol import KINDS, tool_schemas
-from .telemetry import Monitor, progress, usage, training_callback
+from .telemetry import Monitor, progress, usage, training_callback, metrics
 
 
 def tokenize_turn(row, tok, max_seq_len):
@@ -76,6 +76,7 @@ def train_sft(config, checkpoint, data_path, output):
                   "supervised_tokens_per_epoch": sum(sum(y != -100 for y in f["labels"]) for f in kept),
                   "checkpoint": checkpoint, "data": data_path}
         write_json(str(Path(output) / "sft_data_report.json"), report)
+        metrics(report, "sft_data")
         print(report, flush=True)
         args = TrainingArguments(output_dir=output, per_device_train_batch_size=1,
             gradient_accumulation_steps=config.get("sft_accumulation", 8),
@@ -84,6 +85,7 @@ def train_sft(config, checkpoint, data_path, output):
             max_steps=config.get("sft_max_steps", -1), bf16=torch.cuda.is_available(),
             gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
             logging_steps=1, save_strategy="steps", save_steps=config.get("save_steps", 10),
+            # W&B is owned by Monitor; avoid a second Trainer integration/run.
             save_total_limit=2, report_to=[], remove_unused_columns=False,
             seed=config["seed"])
         class LoggedSFTTrainer(Trainer):
@@ -98,6 +100,7 @@ def train_sft(config, checkpoint, data_path, output):
                           data_collator=DataCollatorForSeq2Seq(tok, padding=True, label_pad_token_id=-100))
         start = time.monotonic()
         result = trainer.train(resume_from_checkpoint=resume_checkpoint)
+        metrics(result.metrics, "train", trainer_step=trainer.state.global_step)
         trainer.save_model(output)
         tok.save_pretrained(output)
         write_json(str(Path(output) / "training_metrics.json"),
@@ -266,6 +269,7 @@ def train_rl(config, checkpoint, data_path, output):
             environment_factory=make_environment(rows, advisors, config["max_depth"]))
         start = time.monotonic()
         result = trainer.train(resume_from_checkpoint=resume_checkpoint)
+        metrics(result.metrics, "train", trainer_step=trainer.state.global_step)
         trainer.save_model(output)
         tok.save_pretrained(output)
         write_json(str(Path(output) / "training_metrics.json"), {**result.metrics,

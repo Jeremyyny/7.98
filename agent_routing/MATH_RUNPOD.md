@@ -2,6 +2,7 @@
 
 本实现把已有 MARGENT 的同状态反事实比较、最短成功分支选择，扩展到自由回答数学。
 入口为 `python -m src.verifiable`，所有命令在 `agent_routing/` 下运行。
+第一次运行请按 [RunPod + W&B 分步教程](MATH_RUNPOD_QUICKSTART.md) 操作，包含登录检查、GPU smoke test、9B 短训练、正式实验和恢复。
 旧的 MCQ 入口、实验配置和数值不受影响。新模块复用 `StandardRow`、IO 和原有的最短成功路径选择函数。
 
 ## 实验范围与 benchmark
@@ -51,7 +52,7 @@ RL 每个阶段开始时用当时的 SFT checkpoint 重新生成草稿；该阶�
 
 ```bash
 cd /workspace
-git clone --branch codex/math-rsi-runpod https://github.com/Jeremyyny/7.98.git
+git clone --branch codex/math-wandb-runpod https://github.com/Jeremyyny/7.98.git
 cd /workspace/7.98/agent_routing
 bash scripts/runpod_math_setup.sh
 source /workspace/margent-venv/bin/activate
@@ -61,6 +62,35 @@ export MARGENT_RUN_ROOT=/workspace/margent-runs
 
 依赖与原 MCQ 环境分开。Transformers/TRL/PEFT/Math-Verify 已固定版本；脚本另保存实际安装锁文件和 GPU 信息。
 GPU 训练依赖 Pod 镜像中的 CUDA PyTorch，不要在 CPU 镜像里期待本脚本自动配置驱动。
+
+## Weights & Biases
+
+W&B SDK 已加入数学依赖。启用方式是 `wandb login`，然后在运行 manager 的终端设置
+`MARGENT_WANDB_MODE=online`、`WANDB_PROJECT=margent-math-rsi` 和 `WANDB_ENTITY=你的用户名或团队`。
+没有设置时默认为 `disabled`，保持原有本地记录方式；`offline` 则只写本地 W&B 文件。
+可以先运行 `python -m src.verifiable wandb-check --out /workspace/margent-runs/wandb-check`，不加载模型或占用 GPU。
+
+同一实验组和 seed 共用一个 W&B group；loop、collection、SFT、RL、开发评估和外部评估各有独立 run。
+在线模式从各阶段的 `wandb_run.json` 恢复同一 run；新实验目录获得新的 group 和 run ID。
+W&B 历史步数与 Trainer 的 `trainer_step` 分开，因此恢复到较早的 checkpoint 不会让重试日志因步数回退被丢弃。
+恢复前后的同一步可能有重复观测，不应当作独立重复实验。
+离线模式不支持 SDK resume，每次重启记录为新的 segment/run，使用共同的 `logical_stage_id` 标识同一阶段。
+
+| W&B 指标 | 来源与含义 |
+|---|---|
+| `train/*`、`trainer_step` | SFT/GRPO 的 loss、learning rate、reward、KL 等 Trainer 实际返回的标量；未返回的字段不补造 |
+| `eval/independent_accuracy`、`eval/policy_accuracy`、`eval/mean_calls` | 每个已完成开发检查点的 D/P/调用数；loop run 的横轴为 `diagnostic_step` |
+| `eval/delegation_search_coverage` | 固定搜索协议下的实测覆盖率，仅采集/开发诊断有此值 |
+| `internalization/*` | 相对初始开发集的独立新解题/退步，以及初始救援题后来独立答对的比例；分母为零时不生成比例 |
+| `test/initial/*`、`test/final/*` | evaluate_suite run 中的两项外部测试，不用于挑选 checkpoint |
+| `usage/*` | 当前阶段已观测的累计实际生成 token、训练输入/监督 token、缓存命中和请求耗时；恢复时包含原有日志 |
+| `gpu/*`、`system/*`、`progress/*` | 显存、利用率、功耗、磁盘、耗时与阶段进度；GPU 指标是设备级，可能包括其他进程 |
+
+W&B 通过现有 Monitor/callback 接入，因此 Trainer 的 `report_to=[]` 保留，避免它再建立第二个 run。
+只同步配置和标量；完整解答、标准答案、checkpoint 权重继续保存在本地，不自动上传。
+W&B 的 `usage/*` 为各阶段记录；跨阶段成本比较仍使用 `report` 导出的 `costs.csv`，不能直接将不同阶段或重试的累计曲线相加。
+初始化失败会在加载该阶段模型前报错；运行中发生同步异常会警告并继续保留本地日志。`status.json` 会记录 `wandb_status`。
+每个阶段的链接写入 `wandb_link.json`；增加的标量镜像写入 `metrics.jsonl`。已有完成阶段不会重新训练以补齐 W&B 训练曲线。
 
 ## 先做 GPU smoke test
 

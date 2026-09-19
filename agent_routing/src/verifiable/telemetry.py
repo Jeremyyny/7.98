@@ -15,6 +15,7 @@ import traceback
 import uuid
 
 from ..utils.io import append_jsonl
+from .wandb_tracking import WandbTracker, scalar_metrics
 
 ACTIVE = None
 
@@ -38,17 +39,33 @@ class Monitor:
         self.attempt = uuid.uuid4().hex
         self.stop = threading.Event()
         self.lock = threading.RLock()
+        self.tracker = WandbTracker(self.root, stage, self.attempt)
+        self.wandb_failed = False
+        self.totals = {}
         self.state = {"schema_version": 1, "stage": stage, "attempt": self.attempt,
                       "status": "running", "started_at": now(), "pid": os.getpid(),
                       "hostname": socket.gethostname(), "progress": {}}
 
     def __enter__(self):
         global ACTIVE
-        self.previous, ACTIVE = ACTIVE, self
         self.root.mkdir(parents=True, exist_ok=True)
+        ledger = self.root / "usage.jsonl"
+        if ledger.exists():
+            with ledger.open() as records:
+                for line in records:
+                    self._count_usage(json.loads(line))
+        try:
+            self.tracker.start()
+        except Exception:
+            try:
+                self.tracker.finish("failed")
+            except Exception:
+                pass
+            raise
+        self.previous, ACTIVE = ACTIVE, self
         self.started = time.monotonic()
         packages = {}
-        for name in ("torch", "transformers", "trl", "peft", "datasets", "math-verify", "matplotlib"):
+        for name in ("torch", "transformers", "trl", "peft", "datasets", "math-verify", "matplotlib", "wandb"):
             try:
                 packages[name] = importlib.metadata.version(name)
             except importlib.metadata.PackageNotFoundError:
@@ -88,11 +105,43 @@ class Monitor:
         item.update(time=now(), attempt=self.attempt, role=role, context=dict(self.state["progress"]), **extra)
         with self.lock:
             append_jsonl(str(self.root / "usage.jsonl"), [item])
+            self._count_usage(item)
+
+    def _count_usage(self, item):
+        prefix = "usage/" + item["role"] + "/"
+        values = {"prompt_tokens": item.get("actual_prompt_tokens", item.get("prompt_tokens", 0)),
+                  "generated_tokens": item.get("actual_completion_tokens", item.get("completion_tokens", 0)),
+                  "seconds": item.get("seconds", 0), "cache_hits": int(item.get("cache_hit", False)),
+                  "input_tokens": item.get("input_tokens", 0),
+                  "supervised_tokens": item.get("supervised_tokens", 0)}
+        for key, value in values.items():
+            self.totals[prefix + key] = self.totals.get(prefix + key, 0) + value
+
+    def log_wandb(self, values):
+        if self.wandb_failed:
+            return
+        try:
+            self.tracker.log(values)
+        except Exception as exc:
+            self.wandb_failed = True
+            self.state["wandb_status"] = "upload_error_local_logs_retained"
+            self.event("wandb_warning", error_type=type(exc).__name__)
+            print("[wandb] Upload failed; training continues with local logs. Check events.jsonl.", flush=True)
+
+    def metrics(self, values, namespace="", **axes):
+        values = {**scalar_metrics(values, namespace), **scalar_metrics(axes)}
+        with self.lock:
+            append_jsonl(str(self.root / "metrics.jsonl"), [{"time": now(), "attempt": self.attempt, **values}])
+            self.log_wandb(values)
 
     def _heartbeat(self):
         while not self.stop.is_set():
             try:
                 self.update()
+                with self.lock:
+                    self.log_wandb({"system/elapsed_seconds": self.state["elapsed_seconds"],
+                                    "system/disk_free_gib": self.state["disk_free_bytes"] / 2 ** 30,
+                                    **scalar_metrics(self.state["progress"], "progress"), **self.totals})
                 result = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid,memory.used,memory.total,utilization.gpu,power.draw",
                                          "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
@@ -100,6 +149,17 @@ class Monitor:
                         append_jsonl(str(self.root / "gpu_samples.jsonl"), [{"time": now(), "attempt": self.attempt,
                             "columns": ["index", "uuid", "memory_used_mib", "memory_total_mib", "utilization_percent", "power_watts"],
                             "devices": [line.split(", ") for line in result.stdout.strip().splitlines()]}])
+                        gpu = {}
+                        for line in result.stdout.strip().splitlines():
+                            parts = [p.strip() for p in line.split(",")]
+                            if len(parts) != 6:
+                                continue
+                            for key, val in zip(("memory_used_mib", "memory_total_mib", "utilization_percent", "power_watts"), parts[2:]):
+                                try:
+                                    gpu[f"gpu/{parts[0]}/{key}"] = float(val)
+                                except ValueError:
+                                    pass
+                        self.log_wandb(gpu)
             except FileNotFoundError:
                 pass  # CPU validation has no nvidia-smi.
             except Exception as exc:
@@ -120,7 +180,13 @@ class Monitor:
                 out.write(f"\n{now()} attempt={self.attempt}\n{error}")
         self.event(status, wall_seconds=elapsed, error=str(value) if typ else None)
         self.update()
-        ACTIVE = self.previous
+        try:
+            self.log_wandb({**self.totals, "system/elapsed_seconds": elapsed})
+            self.tracker.finish(status)
+        except Exception as exc:
+            self.event("wandb_warning", error_type=type(exc).__name__)
+        finally:
+            ACTIVE = self.previous
 
 
 def progress(**values):
@@ -131,6 +197,11 @@ def progress(**values):
 def usage(role, value, **extra):
     if ACTIVE:
         ACTIVE.usage(role, value, **extra)
+
+
+def metrics(values, namespace="", **axes):
+    if ACTIVE:
+        ACTIVE.metrics(values, namespace, **axes)
 
 
 def status_snapshot(run_dir):
@@ -170,6 +241,7 @@ def training_callback(output):
             append_jsonl(str(Path(output) / "training_log.jsonl"), [{"time": now(),
                          "attempt": ACTIVE.attempt if ACTIVE else None, "step": state.global_step,
                          "epoch": state.epoch, **(logs or {})}])
+            metrics(logs or {}, "train", trainer_step=state.global_step)
 
         def on_step_end(self, args, state, control, **kwargs):
             progress(phase="training", step=state.global_step, max_steps=state.max_steps, epoch=state.epoch)
