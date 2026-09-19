@@ -10,7 +10,7 @@ from .data import identity
 from .protocol import (FINAL_RULE, KINDS, call_message, messages, parse_calls, tool_schemas)
 from .telemetry import progress
 
-DECIDE = "Review your current candidate. Either commit with a complete solution or request one unused advisor. " + FINAL_RULE
+DECIDE = "Review your current candidate. Either commit with a complete solution or request one unused sub-agent. " + FINAL_RULE
 PROBE = "For this forced-commit probe, use the available evidence and finish your solution without calling tools. " + FINAL_RULE
 
 

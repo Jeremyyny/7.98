@@ -37,7 +37,7 @@ Run commands from `agent_routing/`.
 export BASE_MODEL="Qwen/Qwen3-8B"
 export TEACHER_ID="medqa_marginal_v1"
 export MEDQA_CACHE="outputs/data/medqa_us4_normalized.jsonl"
-export TASK_DESC="You are a manager agent solving a medical multiple-choice question."
+export TASK_DESC="You are a manager agent solving a multiple-choice question."
 export TRAIN_SIZE=1400
 export DEV_SIZE=200
 export TEST_SIZE=500

@@ -3,7 +3,7 @@
 Design intent:
   - Verifier audits the reasoning process for logical errors, computational
     mistakes, and missing domain knowledge — WITHOUT stating the final answer.
-  - Domain-agnostic: works for medical, legal, math, physics, CS, etc.
+  - Domain-agnostic: uses the subject matter of the supplied question.
   - GT-blind: teacher sees only question, choices, and context.
 """
 from __future__ import annotations

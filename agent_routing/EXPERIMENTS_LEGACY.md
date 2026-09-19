@@ -148,7 +148,7 @@ done
 export TID=gpt_medqa_0p6b
 export BASE=Qwen/Qwen3-0.6B
 export CACHE=outputs/data/medqa_us4_normalized.jsonl
-export TASK="You are a manager agent solving USMLE-style medical multiple-choice questions."
+export TASK="You are a manager agent solving multiple-choice questions."
 export PYTHONUTF8=1
 
 # ── Step 1: cache MedQA ───────────────────────────────────────────────────────
@@ -334,7 +334,7 @@ export TID=ds_medqa_4b
 export BASE=Qwen/Qwen3-4B
 export CACHE=outputs/data/medqa_us4_normalized.jsonl
 export DATA_TID=ds_medqa_data          # where DeepSeek SFT data lives
-export TASK="You are a manager agent solving USMLE-style medical multiple-choice questions."
+export TASK="You are a manager agent solving multiple-choice questions."
 export PYTHONUTF8=1
 
 # ── Step 3: SFT-train subagents (DeepSeek data already generated) ─────────────
@@ -500,7 +500,7 @@ export TID=ds_medqa_8b
 export BASE=Qwen/Qwen3-8B
 export CACHE=outputs/data/medqa_us4_normalized.jsonl
 export DATA_TID=ds_medqa_data          # same SFT data files as experiment C
-export TASK="You are a manager agent solving USMLE-style medical multiple-choice questions."
+export TASK="You are a manager agent solving multiple-choice questions."
 export PYTHONUTF8=1
 
 # ── Step 3: SFT-train subagents ───────────────────────────────────────────────

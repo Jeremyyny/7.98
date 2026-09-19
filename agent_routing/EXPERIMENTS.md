@@ -71,7 +71,7 @@ export PROVIDER=openai
 export MODEL=gpt-4o
 export OPENAI_API_KEY=...
 export MEDQA_CACHE=outputs/data/medqa_us4_normalized.jsonl
-export TASK_DESC="You are a manager agent solving USMLE-style medical multiple-choice questions."
+export TASK_DESC="You are a manager agent solving multiple-choice questions."
 # split budget: 3x500 advisor SFT + 300 cold start + ~600 GRPO, all inside the train pool
 export SPLIT="--train_size 1400 --dev_size 200 --test_size 500"
 ```
@@ -355,7 +355,7 @@ out=[]
 for r in train[:800]:   # ~ matches the 3x500 + 300 teacher-token budget; recount after generation
     ch = "\n".join(f"  {k}. {v}" for k,v in r["choices"].items())
     out.append({"example_id": r["example_id"],
-        "prompt":[{"role":"system","content":"Answer the medical MCQ. Reason step by step, then end with one line: ANSWER_<LETTER>."},
+        "prompt":[{"role":"system","content":"Answer the multiple-choice question. Reason step by step, then end with one line: ANSWER_<LETTER>."},
                   {"role":"user","content":f"{r['question']}\n\nChoices:\n{ch}"}],
         "ground_truth": r["ground_truth"], "choices": r["choices"]})
 write_jsonl("outputs/sft_data/distill_cot_prompts.jsonl", out)
