@@ -26,7 +26,7 @@ def configure_tokenizer(tok):
     return tok
 
 
-def load_model(base_model, checkpoint=None, trainable=False, lora_rank=16):
+def load_model(base_model, checkpoint=None, trainable=False, lora_rank=16, revision=None):
     progress(phase="loading_model", checkpoint=checkpoint or base_model)
     import torch
     import transformers as tr
@@ -40,15 +40,17 @@ def load_model(base_model, checkpoint=None, trainable=False, lora_rank=16):
         recorded = saved.get("base_model_name_or_path")
         if recorded and recorded != base_model:
             raise ValueError(f"Adapter base {recorded!r} differs from configured {base_model!r}")
-    config = tr.AutoConfig.from_pretrained(weights)
+    revision_args = {"revision": revision} if revision and not Path(weights).is_dir() else {}
+    config = tr.AutoConfig.from_pretrained(weights, **revision_args)
     # Qwen3.5 official checkpoints contain a multimodal config. Use its text
     # causal LM class (documented by Transformers), not AutoModelForCausalLM's
     # mapping for the enclosing multimodal config.
     cls = (getattr(tr, "Qwen3_5ForCausalLM") if config.model_type == "qwen3_5"
            else tr.AutoModelForCausalLM)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = cls.from_pretrained(weights, dtype=torch.bfloat16 if device == "cuda" else torch.float32)
-    tok = configure_tokenizer(tr.AutoTokenizer.from_pretrained(source))
+    model = cls.from_pretrained(weights, dtype=torch.bfloat16 if device == "cuda" else torch.float32, **revision_args)
+    tokenizer_args = revision_args if not adapter else {}
+    tok = configure_tokenizer(tr.AutoTokenizer.from_pretrained(source, **tokenizer_args))
     if tok.pad_token_id is None:
         tok.pad_token_id = tok.eos_token_id
     tok.padding_side = "left"
@@ -83,8 +85,8 @@ def render(tokenizer, messages, tools=None, generation=True):
 
 
 class HFBackend:
-    def __init__(self, base_model, checkpoint=None, max_context=16384):
-        self.tokenizer, self.model = load_model(base_model, checkpoint)
+    def __init__(self, base_model, checkpoint=None, max_context=16384, revision=None):
+        self.tokenizer, self.model = load_model(base_model, checkpoint, revision=revision)
         self.max_context = max_context
 
     def generate(self, messages, tools=None, max_tokens=2048, temperature=0.0, seed=42):
@@ -102,7 +104,12 @@ class HFBackend:
                 do_sample=temperature > 0, pad_token_id=self.tokenizer.pad_token_id,
                 **({"temperature": temperature} if temperature > 0 else {}))
         ids = out[0, n:]
-        result = {"text": self.tokenizer.decode(ids, skip_special_tokens=True).strip(),
+        text = self.tokenizer.decode(ids, skip_special_tokens=False).strip()
+        # Preserve tool markers even when the tokenizer marks them special.
+        for token in {self.tokenizer.eos_token, self.tokenizer.pad_token}:
+            if token and text.endswith(token):
+                text = text[:-len(token)].rstrip()
+        result = {"text": text,
                 "prompt_tokens": n, "completion_tokens": len(ids),
                 "seconds": time.monotonic() - start,
                 "truncated": bool(len(ids) >= max_tokens and int(ids[-1]) != self.tokenizer.eos_token_id)}

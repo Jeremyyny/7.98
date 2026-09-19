@@ -16,6 +16,11 @@ from .backend import HFBackend, HTTPAdvisors
 from .data import identity, load_rows, verify_manifest
 from .experiment import collect_one, compare, policy_rollout, root_state, sft_rows, summary
 from .telemetry import Monitor, atomic_json, progress, metrics
+from .protocol import PROTOCOL_VERSION
+from .provenance import harness_identity
+from .analysis import conditional_metrics
+
+SFT_ARMS = ("dynamic_sft", "success_sft", "static_sft")
 
 
 def _digest(path):
@@ -30,9 +35,15 @@ def load_config(path):
             raise ValueError(f"Missing config field: {key}")
     if cfg["max_depth"] not in (1, 2, 3):
         raise ValueError("max_depth must be 1, 2 or 3")
+    if cfg.get("protocol_version", PROTOCOL_VERSION) != PROTOCOL_VERSION:
+        raise ValueError("This runner requires protocol_version=2 and fresh run directories")
     for key in ("max_new_tokens", "advisor_max_tokens", "max_context", "max_seq_len"):
         if cfg[key] <= 0:
             raise ValueError(f"{key} must be positive")
+    if cfg.get("temperature", 0) != 0:
+        raise ValueError("Paper protocol uses deterministic generation (temperature=0)")
+    if cfg.get("decision_max_tokens", 128) <= 0:
+        raise ValueError("decision_max_tokens must be positive")
     return cfg
 
 
@@ -51,12 +62,14 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
     allowed = {"collect": "train", "diagnose": "dev", "evaluate": "test"}
     rows = load_rows(data, required_split=allowed[mode])
     rows = sorted(rows, key=lambda r: identity(r.question))
+    if limit < 0:
+        raise ValueError("limit must be nonnegative")
     if limit > 0:
         rows = rows[:limit]
     root = Path(output)
     root.mkdir(parents=True, exist_ok=True)
     signature = {"config": cfg, "data_sha256": _digest(data), "checkpoint": checkpoint_identity(checkpoint),
-                 "mode": mode, "limit": limit, "selection": selection, "protocol_version": 1}
+                 "mode": mode, "limit": limit, "selection": selection, "protocol_version": PROTOCOL_VERSION, "harness": harness_identity()}
     meta = root / "run.json"
     if meta.exists():
         if not resume or json.loads(meta.read_text()) != signature:
@@ -66,31 +79,43 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
             raise ValueError("Output directory is not empty and has no matching run manifest")
         write_json(str(meta), signature)
     path = root / "records.jsonl"
-    records = read_jsonl(str(path)) if path.exists() else []
+    shards = root / "questions"
+    if shards.exists():
+        records = [json.loads(p.read_text()) for p in sorted(shards.glob("*.json"))]
+        write_jsonl(str(path), records)  # Recover a torn append from atomic question shards.
+    else:
+        records = read_jsonl(str(path)) if path.exists() else []
+        for record in records:
+            atomic_json(shards / (record["question_hash"] + ".json"), record)
     seen = {r["question_hash"] for r in records}
     if len(seen) != len(records) or seen - {identity(r.question) for r in rows}:
         raise ValueError("Invalid resume record identities")
     pending = [r for r in rows if identity(r.question) not in seen]
     with Monitor(output, mode):
         if pending:
-            backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"])
-            advisors = advisors or HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"))
+            backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"], revision=cfg.get("base_model_revision"))
+            if advisors is None:
+                frozen = verify_advisor(cfg, root)
+                advisors = HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"))
+                if not cfg.get("external_advisor_identity"):
+                    advisors.identity = frozen
         started = time.monotonic()
         for row in pending:
             progress(completed_examples=len(records), total_examples=len(rows), question_hash=identity(row.question))
-            seed = (cfg["seed"] + int(identity(row.question)[:8], 16)) % (2 ** 31)
+            seed = (cfg.get("generation_seed", 1234) + int(identity(row.question)[:8], 16)) % (2 ** 31)
             if mode == "evaluate":
                 direct, history = root_state(row, backend, cfg, seed)
                 from .answers import correct
                 policy = policy_rollout(row, backend, advisors, cfg, seed, direct, history)
                 record = {"question_hash": identity(row.question), "example_id": row.example_id,
-                          "benchmark_name": row.benchmark_name, "split": row.split,
+                          "benchmark_name": row.benchmark_name, "split": row.split, "protocol_version": PROTOCOL_VERSION,
                           "direct_correct": bool(direct["valid"] and correct(direct["text"], row.ground_truth)),
                           "direct_valid": direct["valid"], "direct_truncated": direct.get("truncated", False),
-                          "direct_text": direct["text"], "policy": policy,
+                          "direct_text": direct["text"], "ground_truth": row.ground_truth, "policy": policy,
                           "costs": [{"role": "manager", **direct}] + policy["costs"]}
             else:
                 record = collect_one(row, backend, advisors, cfg, seed, evaluate_policy=mode == "diagnose")
+            atomic_json(shards / (record["question_hash"] + ".json"), record)
             append_jsonl(str(path), [record])
             records.append(record)
             progress(completed_examples=len(records), total_examples=len(rows))
@@ -112,6 +137,10 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
 
 
 def build_plan(config_path, data_dir, output, arm, rounds, initial=None):
+    if arm not in SFT_ARMS:
+        raise ValueError("Protocol v2 supports dynamic_sft, success_sft and static_sft; legacy GRPO arms are disabled")
+    if rounds < 1:
+        raise ValueError("rounds must be positive")
     root = Path(output).resolve()
     data = Path(data_dir).resolve()
     cfg = load_config(config_path)
@@ -128,17 +157,13 @@ def build_plan(config_path, data_dir, output, arm, rounds, initial=None):
     add("diagnose", data / "dev.jsonl", checkpoint, root / "initial_dev", ["--resume"])
     for n in range(1, rounds + 1):
         rd = root / f"round_{n}"
-        collection = root / "round_1" / "collection" if arm == "static_rl" else rd / "collection"
-        if n == 1 or arm != "static_rl":
+        collection = root / "round_1" / "collection" if arm == "static_sft" else rd / "collection"
+        if n == 1 or arm != "static_sft":
             add("collect", data / "train.jsonl", checkpoint, collection,
-                ["--resume", "--selection", "success" if arm == "success_rl" else "counterfactual"])
+                ["--resume", "--selection", "success" if arm == "success_sft" else "counterfactual"])
         add("sft", collection / "sft.jsonl", checkpoint, rd / "sft")
         checkpoint = str(rd / "sft")
         add("diagnose", data / "dev.jsonl", checkpoint, rd / "sft_dev", ["--resume"])
-        if arm != "dynamic_sft":
-            add("rl", data / "train.jsonl", checkpoint, rd / "rl")
-            checkpoint = str(rd / "rl")
-            add("diagnose", data / "dev.jsonl", checkpoint, rd / "rl_dev", ["--resume"])
     return plan
 
 
@@ -153,7 +178,7 @@ def run_loop(config_path, data_dir, output, arm, rounds, initial=None, resume=Fa
         return plan
     root = Path(output).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    signature = {"config": load_config(config_path), "data_manifest": manifest, "arm": arm,
+    signature = {"harness": harness_identity(), "config": load_config(config_path), "data_manifest": manifest, "arm": arm,
                  "rounds": rounds, "initial": initial, "plan": plan}
     runfile = root / "loop.json"
     if runfile.exists():
@@ -199,6 +224,7 @@ def log_diagnostic(root, step, index):
     if rescued:
         values["rescued_now_independent_rate"] = gained / rescued
     metrics(values, "internalization", diagnostic_step=index)
+    metrics(conditional_metrics(after, before), "delegation", diagnostic_step=index)
 
 
 def execute_stage(step, log_dir):
@@ -256,6 +282,8 @@ def evaluate_suite(run_dir, data_dir, dry_run=False):
     run = json.loads((root / "loop.json").read_text())
     if verify_manifest(data_dir) != run["data_manifest"]:
         raise ValueError("External evaluation data differ from the frozen experiment manifest")
+    if run.get("harness") != harness_identity():
+        raise ValueError("Harness changed since training; evaluate with the exact recorded code")
     training = [p for p in run["plan"] if p["stage"] in {"sft", "rl"}]
     if not training or not all((Path(p["output"]) / ".stage_complete.json").exists() for p in run["plan"]):
         raise ValueError("Complete the planned loop before the locked initial/final external evaluation")
@@ -300,6 +328,15 @@ def verify_advisor(config, root):
         identity = config.get("external_advisor_identity")
         if identity is None:
             raise ValueError("Advisor identity unavailable: use the bundled server or declare external_advisor_identity")
+    expected_model = config.get("advisor_base_model", config.get("base_model"))
+    if identity.get("harness") is not None and identity["harness"] != harness_identity():
+        raise ValueError("Subagent server uses a different harness/environment; restart it with the frozen version")
+    if expected_model and identity.get("model") and identity["model"] != expected_model:
+        raise ValueError("Advisor model differs from configured advisor_base_model/base_model")
+    expected_revision = config.get("advisor_revision", config.get("base_model_revision"))
+    actual_revision = identity.get("requested_revision") or identity.get("resolved_revision")
+    if expected_revision and actual_revision and actual_revision != expected_revision:
+        raise ValueError("Advisor revision differs from frozen configuration")
     path = Path(root) / "advisor_identity.json"
     if path.exists() and json.loads(path.read_text()) != identity:
         raise ValueError("Frozen advisor identity changed across stages; use the original advisor")

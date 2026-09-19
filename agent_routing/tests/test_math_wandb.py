@@ -180,7 +180,7 @@ class WandbTest(unittest.TestCase):
             write_json(str(current / "summary.json"), {"independent_accuracy": .5})
             with patch("src.verifiable.runner.metrics") as emit:
                 log_diagnostic(root, {"output": str(current)}, 1)
-            result = emit.call_args_list[-1].args[0]
+            result = next(call.args[0] for call in emit.call_args_list if call.args[1] == "internalization")
             self.assertEqual(result["rescued_now_independent_rate"], 1.)
             self.assertEqual(result["newly_solved_n"], 1)
             self.assertEqual(result["regressed_n"], 1)

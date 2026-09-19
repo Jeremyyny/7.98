@@ -46,7 +46,7 @@ it.close()
             text = Qwen3_5ForCausalLM.from_pretrained(tmp)
             self.assertTrue(torch.equal(expected, text.model.embed_tokens.weight))
 
-    def test_sft_and_grpo_update_then_reload_adapter(self):
+    def test_sft_continuation_then_reload_adapter(self):
         import torch
         from tokenizers import Tokenizer
         from tokenizers.models import WordLevel
@@ -82,7 +82,7 @@ it.close()
             sft = root / "sft.jsonl"
             write_jsonl(str(sft), [{"prompt": messages(problem, direct=True),
                         "response": [{"role": "assistant", "content": r"FINAL_ANSWER: \boxed{2}"}],
-                        "decision_type": "independent_solution"}])
+                        "decision_type": "independent_solution", "split": "train", "protocol_version": 2}])
             cfg = {"base_model": str(base), "seed": 42, "advisor_url": "http://127.0.0.1:1",
                    "max_depth": 1, "max_new_tokens": 4, "advisor_max_tokens": 4,
                    "max_context": 4096, "max_seq_len": 4096, "sft_max_steps": 1,
@@ -90,17 +90,15 @@ it.close()
                    "num_generations": 2, "rl_max_completion_length": 4, "save_steps": 1}
             train_sft(cfg, str(base), str(sft), str(root / "sft"))
             self.assertTrue((root / "sft/adapter_model.safetensors").exists())
-            train_rl(cfg, str(root / "sft"), str(normalized), str(root / "rl"))
-            self.assertTrue((root / "rl/adapter_model.safetensors").exists())
-            _, restored = load_model(str(base), str(root / "rl"))
+            train_sft(cfg, str(root / "sft"), str(sft), str(root / "continued"))
+            self.assertTrue((root / "continued/adapter_model.safetensors").exists())
+            _, restored = load_model(str(base), str(root / "continued"))
             self.assertFalse(any(p.requires_grad for p in restored.parameters()))
             # Idempotent completed-stage restart.
-            train_rl(cfg, str(root / "sft"), str(normalized), str(root / "rl"))
-            metrics = json.loads((root / "rl/training_metrics.json").read_text())
+            train_sft(cfg, str(root / "sft"), str(sft), str(root / "continued"))
+            metrics = json.loads((root / "continued/training_metrics.json").read_text())
             self.assertIn("train_loss", metrics)
-            usage = [json.loads(line) for line in (root / "rl/usage.jsonl").read_text().splitlines()]
-            self.assertTrue(any(r["role"] == "manager_rl" and r["completion_tokens"] > 0 for r in usage))
-            self.assertEqual(json.loads((root / "rl/status.json").read_text())["status"], "completed")
-            self.assertTrue((root / "rl/training_log.jsonl").exists())
-            rollouts = [json.loads(line) for line in (root / "rl/rollouts.jsonl").read_text().splitlines()]
-            self.assertTrue(all("completion" in r and r["step"] is not None for r in rollouts))
+            usage = [json.loads(line) for line in (root / "continued/usage.jsonl").read_text().splitlines()]
+            self.assertTrue(any(r["role"] == "sft_train" and r["supervised_tokens"] > 0 for r in usage))
+            self.assertEqual(json.loads((root / "continued/status.json").read_text())["status"], "completed")
+            self.assertTrue((root / "continued/training_log.jsonl").exists())

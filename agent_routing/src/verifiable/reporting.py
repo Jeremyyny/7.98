@@ -12,6 +12,7 @@ import statistics
 
 from ..utils.io import read_jsonl, write_jsonl
 from .telemetry import atomic_json
+from .analysis import conditional_metrics, state_of
 
 
 def wilson(successes, n):
@@ -51,6 +52,8 @@ def coverage(r):
 
 def metrics(records):
     n = len(records)
+    if not n:
+        raise ValueError("Cannot report an empty evaluation")
     result = {"n": n}
     for key, fn, required in [
         ("independent", lambda r: r["direct_correct"], "direct_correct"),
@@ -80,6 +83,7 @@ def metrics(records):
         result.update(rescued_questions=rescue, direct_failures=failures,
                       rescue_rate_pct=100 * rescue / failures if failures else None,
                       branch_count=sum(len(r["branches"]) for r in records))
+    result.update(conditional_metrics(records))
     return result
 
 
@@ -102,6 +106,9 @@ def transitions(before, after, meta, reference):
     for key, old, new in zip(keys, a, b):
         item = {**meta, "reference": reference, "question_hash": key,
                 "before_independent": old["direct_correct"], "after_independent": new["direct_correct"],
+                "before_calls": old["policy"]["calls"], "after_calls": new["policy"]["calls"],
+                "before_state": state_of(old) if "branches" in old else None,
+                "after_state": state_of(new) if "branches" in new else None,
                 "newly_solved_independent": not old["direct_correct"] and new["direct_correct"],
                 "regressed_independent": old["direct_correct"] and not new["direct_correct"]}
         if "branches" in old:
@@ -120,7 +127,8 @@ def stage_cost(path):
     clean = bool(starts) and starts == ends and all(e["event"] != "failed" and e["event"] != "interrupted" for e in events)
     out = {"stage_path": str(path), "observed_wall_seconds": sum(e.get("wall_seconds", 0) for e in events),
            "attempts": len(starts), "accounting_complete": clean and bool(ledger),
-           "sft_processed_tokens": sum(r.get("input_tokens", 0) for r in ledger if r["role"] == "sft_train")}
+           "sft_processed_tokens": sum(r.get("input_tokens", 0) for r in ledger if r["role"] == "sft_train"),
+           "sft_supervised_tokens": sum(r.get("supervised_tokens", 0) for r in ledger if r["role"] == "sft_train")}
     for role, match in [("manager", {"manager", "manager_rl"}), ("advisor", {"advisor"})]:
         for kind in ("prompt", "completion"):
             out[f"{role}_actual_{kind}_tokens"] = sum(r.get(f"actual_{kind}_tokens", r.get(f"{kind}_tokens", 0))
@@ -159,8 +167,8 @@ def generate_report(run_dirs, output, demo=False):
     if request_path.exists():
         # Remove only this reporter's previous exports; never leave an obsolete
         # figure behind when a refreshed report has no supporting observations.
-        names = ("main_results", "development", "paired_changes", "costs", "training_diagnostics", "seed_summary", "paper_main", "paper_mechanism")
-        figures = ("fig1_development", "fig2_internalization", "fig3_external_tests", "fig4_costs", "fig5_rl_training")
+        names = ("main_results", "development", "paired_changes", "costs", "training_diagnostics", "seed_summary", "paper_main", "paper_mechanism", "arm_comparisons", "arm_summary", "delegation_behavior")
+        figures = ("fig1_development", "fig2_internalization", "fig3_external_tests", "fig4_costs", "fig5_rl_training", "fig6_delegation")
         for name, extensions in [(n, ("csv", "tex")) for n in names] + [(n, ("pdf", "png")) for n in figures]:
             for extension in extensions:
                 (out / f"{name}.{extension}").unlink(missing_ok=True)
@@ -168,7 +176,7 @@ def generate_report(run_dirs, output, demo=False):
         raise ValueError("Report output is not empty; choose a fresh directory")
     atomic_json(request_path, request)
     main, dev, changes, questions, costs, training, audits = [], [], [], [], [], [], []
-    warnings, hashes = [], {}
+    warnings, hashes, endpoints = [], {}, []
     run_names = [Path(p).resolve().name for p in run_dirs]
     if len(set(run_names)) != len(run_names):
         raise ValueError("Run directory names must be unique (include arm and seed)")
@@ -188,8 +196,10 @@ def generate_report(run_dirs, output, demo=False):
         protocol["advisor_identity"] = json.loads(identity_path.read_text()) if identity_path.exists() else None
         if not identity_path.exists():
             warnings.append(f"{root.name}: frozen advisor identity was not recorded")
-        protocol["test_data_hashes"] = {k: v for k, v in run["data_manifest"].get("sha256", {}).items()
-                                         if k in {"aime2026.jsonl", "beyondaime.jsonl"}}
+        protocol["data_hashes"] = run["data_manifest"].get("sha256", {})
+        protocol["harness"] = run.get("harness")
+        protocol["initial_checkpoint"] = run.get("initial")
+        protocol["rounds"] = run.get("rounds")
         group = hashlib.sha256(json.dumps(protocol, sort_keys=True).encode()).hexdigest()[:12]
         common = {"run": root.name, "arm": run["arm"], "seed": cfg["seed"], "protocol_group": group}
         audits.append({**common, "path": str(root), "config": cfg, "data_manifest": run["data_manifest"]})
@@ -222,7 +232,7 @@ def generate_report(run_dirs, output, demo=False):
             if not complete or not (path / "records.jsonl").exists():
                 continue
             records = read_jsonl(str(path / "records.jsonl"))
-            check_records(path, records, hashes, run["data_manifest"].get("sha256", {}).get("dev.jsonl"), cfg)
+            check_records(path, records, hashes, run["data_manifest"].get("sha256", {}).get("dev.jsonl"), cfg, run.get("harness"))
             if len(records) != run["data_manifest"]["counts"]["dev"]:
                 raise ValueError(f"Development set is incomplete: {path}")
             if "max_depth" in cfg:
@@ -237,6 +247,7 @@ def generate_report(run_dirs, output, demo=False):
                       "cumulative_method_generation_tokens": method_tokens, "accounting_complete": accounting}
             if initial is not None:
                 baseline = initial[1]
+                result.update(conditional_metrics(records, baseline))
                 rescued = [r["question_hash"] for r in baseline if not r["direct_correct"] and coverage(r)]
                 after = {r["question_hash"]: r for r in records}
                 internalized = sum(after[k]["direct_correct"] for k in rescued)
@@ -251,15 +262,17 @@ def generate_report(run_dirs, output, demo=False):
                 initial = (label, records)
             previous = (label, records)
             dev.append(result)
+            if step == [p for p in run["plan"] if p["stage"] == "diagnose"][-1]:
+                endpoints.append({**common, "benchmark": "development", "records": records})
         for benchmark in ("aime2026", "beyondaime"):
             baseline = None
             for checkpoint in ("initial", "final"):
                 path = root / "test" / checkpoint / benchmark
-                if not (path / "summary.json").exists() or not (path / "records.jsonl").exists():
+                if not all((path / name).exists() for name in ("summary.json", "records.jsonl", ".stage_complete.json")):
                     warnings.append(f"{root.name}/test/{checkpoint}/{benchmark}: missing external evaluation")
                     continue
                 records = read_jsonl(str(path / "records.jsonl"))
-                check_records(path, records, hashes, run["data_manifest"].get("sha256", {}).get(benchmark + ".jsonl"), cfg)
+                check_records(path, records, hashes, run["data_manifest"].get("sha256", {}).get(benchmark + ".jsonl"), cfg, run.get("harness"))
                 if run["data_manifest"].get("sha256"):
                     final_training = [p for p in run["plan"] if p["stage"] in {"sft", "rl"}][-1]["output"]
                     expected_checkpoint = (run["initial"] or cfg["base_model"]) if checkpoint == "initial" else final_training
@@ -270,6 +283,8 @@ def generate_report(run_dirs, output, demo=False):
                     raise ValueError(f"Partial or mislabeled external test: {path}")
                 meta = {**common, "checkpoint": checkpoint, "benchmark": benchmark}
                 main.append({**meta, **metrics(records)})
+                if checkpoint == "final":
+                    endpoints.append({**common, "benchmark": benchmark, "records": records})
                 costs.append({**common, "stage": f"test/{checkpoint}/{benchmark}", "purpose": "external_test", **stage_cost(path)})
                 if checkpoint == "initial":
                     baseline = records
@@ -297,6 +312,39 @@ def generate_report(run_dirs, output, demo=False):
         warnings.append("Some results have one training seed: question-level intervals do not measure training-seed variability")
     if len({r["protocol_group"] for r in main + dev}) > 1:
         warnings.append("Multiple model/budget protocols present: do not interpret pooled comparisons as controlled ablations")
+    arm_rows = []
+    for target in endpoints:
+        if target["arm"] != "dynamic_sft":
+            continue
+        for control in endpoints:
+            if control["arm"] not in {"success_sft", "static_sft"}:
+                continue
+            if any(target[k] != control[k] for k in ("seed", "benchmark", "protocol_group")):
+                continue
+            _, before, after = aligned(control["records"], target["records"])
+            meta = {k: target[k] for k in ("seed", "benchmark", "protocol_group")}
+            meta.update(treatment=target["run"], control=control["run"], control_arm=control["arm"])
+            for metric, getter in (("independent", lambda r: r["direct_correct"]),
+                                   ("policy", lambda r: r["policy"]["correct"])):
+                arm_rows.append({**meta, "metric": metric, **paired_stats(list(map(getter, before)), list(map(getter, after))),
+                                 "mean_calls_delta": statistics.mean(a["policy"]["calls"] - b["policy"]["calls"] for a, b in zip(after, before))})
+    table(out, "arm_comparisons", arm_rows)
+    arm_groups = defaultdict(list)
+    for row in arm_rows:
+        arm_groups[(row["control_arm"], row["benchmark"], row["protocol_group"], row["metric"])].append(row)
+    arm_summary = []
+    for key, rows in arm_groups.items():
+        if len({r["seed"] for r in rows}) != len(rows):
+            raise ValueError("Duplicate seed in paired arm comparison")
+        deltas = [r["delta_pp"] for r in rows]
+        arm_summary.append({**dict(zip(("control_arm", "benchmark", "protocol_group", "metric"), key)),
+                            "num_seeds": len(rows), "delta_pp_mean": statistics.mean(deltas),
+                            "delta_pp_sd": statistics.stdev(deltas) if len(rows) > 1 else None})
+    table(out, "arm_summary", arm_summary)
+    if not arm_rows:
+        warnings.append("No matched dynamic_sft vs success_sft/static_sft comparison is available")
+    behavior_keys = ("currently_", "initially_rescued_", "learned_subset_", "transition_")
+    table(out, "delegation_behavior", [{k: v for k, v in r.items() if k in {"run", "checkpoint", "seed", "arm"} or k.startswith(behavior_keys)} for r in dev])
     for name, rows in [("main_results", main), ("development", dev), ("paired_changes", changes),
                        ("costs", costs), ("training_diagnostics", training), ("seed_summary", seeds)]:
         table(out, name, rows)
@@ -308,7 +356,10 @@ def generate_report(run_dirs, output, demo=False):
     table(out, "paper_mechanism", [{"Run": r["run"], "Checkpoint": r["checkpoint"],
           "D (%)": r["independent_pct"], "P (%)": r["policy_pct"], "C (%)": r.get("search_pct"),
           "Internalized": f"{r['rescued_now_independent_n']}/{r['initial_rescued_n']}" if "initial_rescued_n" in r else None,
-          "Beyond initial C": r.get("outside_initial_search_now_independent_n")} for r in dev])
+          "Beyond initial C": r.get("outside_initial_search_now_independent_n"),
+          "Calls on learned (before)": r.get("learned_subset_before_mean_calls"),
+          "Calls on learned (after)": r.get("initially_rescued_now_independent_mean_calls"),
+          "Still rescuable policy accuracy": r.get("currently_rescuable_policy_accuracy")} for r in dev])
     write_jsonl(str(out / "paired_questions.jsonl"), questions)
     figures = plot(out, main, dev, changes, training, demo)
     manifest = {"demo": demo, "runs": audits, "warnings": warnings, "input_sha256": hashes,
@@ -328,14 +379,29 @@ def generate_report(run_dirs, output, demo=False):
     return {"output": str(out.resolve()), "main_rows": len(main), "development_rows": len(dev), "figures": figures, "warnings": warnings}
 
 
-def check_records(path, records, hashes, expected_data_sha=None, expected_config=None):
+def check_records(path, records, hashes, expected_data_sha=None, expected_config=None, expected_harness=None):
     if not records or len({r["question_hash"] for r in records}) != len(records):
         raise ValueError(f"Empty or duplicate records: {path}")
     saved = json.loads((path / "summary.json").read_text())
     if expected_data_sha:
         metadata = json.loads((path / "run.json").read_text())
+        if expected_harness and (metadata.get("harness") != expected_harness or any(r.get("protocol_version") != expected_harness["protocol_version"] for r in records)):
+            raise ValueError("Evaluation harness/protocol differs from frozen loop")
         if metadata["data_sha256"] != expected_data_sha or metadata["config"] != expected_config:
             raise ValueError(f"Evaluation data or protocol differs from frozen loop: {path}")
+    if expected_config and records[0].get("protocol_version") == 2:
+        from .answers import correct
+        for row in records:
+            if "ground_truth" not in row:
+                raise ValueError("Protocol-v2 records must retain offline gold for grading audits")
+            gold = row["ground_truth"]
+            if row["direct_correct"] != bool(row["direct_valid"] and correct(row["direct_text"], gold)):
+                raise ValueError("Independent raw answer disagrees with saved correctness")
+            if row["policy"]["correct"] != bool(row["policy"]["valid"] and correct(row["policy"]["text"], gold)):
+                raise ValueError("Policy raw answer disagrees with saved correctness")
+            for branch in row.get("branches", []):
+                if branch["correct"] != bool(branch["valid"] and correct(branch["text"], gold)):
+                    raise ValueError("Branch raw answer disagrees with saved correctness")
     if saved["n"] != len(records):
         raise ValueError(f"Summary/record count mismatch: {path}")
     for k, v in metrics(records).items():
@@ -396,6 +462,17 @@ def plot(out, main, dev, changes, training, demo):
         axes[0].legend(fontsize=8)
         axes[1].set(title="Initially rescued → independently solved", ylabel="Conditional rate (%)", ylim=(0, 105))
         save(fig, "fig2_internalization")
+    if dev and any("currently_independent_call_rate" in r for r in dev):
+        fig, axes = plt.subplots(1, 3, figsize=(11, 3.5))
+        for key, title, ax in zip(("currently_independent_call_rate", "initially_rescued_now_independent_mean_calls", "currently_rescuable_policy_accuracy"),
+                                 ("Call rate on independently solved questions", "Mean calls on newly internalized questions", "Policy accuracy on currently rescuable questions"), axes):
+            for run in sorted({r["run"] for r in dev}):
+                rows = sorted([r for r in dev if r["run"] == run], key=lambda r: r["position"])
+                ax.plot([r["position"] for r in rows], [r.get(key) if r.get(key) is not None else float("nan") for r in rows], marker="o", label=run)
+            ax.set(title=title, xlabel="Checkpoint position")
+            ax.grid(alpha=.2)
+        axes[0].legend(fontsize=7)
+        save(fig, "fig6_delegation")
     if main:
         benchmarks = sorted({r["benchmark"] for r in main})
         fig, axes = plt.subplots(1, len(benchmarks), figsize=(6 * len(benchmarks), 4), squeeze=False)

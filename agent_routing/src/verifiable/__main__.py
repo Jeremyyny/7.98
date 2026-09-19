@@ -10,31 +10,28 @@ from pathlib import Path
 from ..utils.io import read_jsonl, write_json
 from .data import prepare
 from .experiment import compare
-from .runner import evaluate_suite, load_config, run_data, run_loop
+from .runner import SFT_ARMS, evaluate_suite, load_config, run_data, run_loop
 
 
 def doctor(config, output):
     import requests
     import torch
     import transformers
-    from trl import GRPOConfig, GRPOTrainer
     from .answers import correct
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU not available. Run training preflight inside the RunPod GPU container")
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise RuntimeError("This first math runner uses one training process; do not launch it with torchrun")
-    if "environment_factory" not in inspect.signature(GRPOTrainer.__init__).parameters:
-        raise RuntimeError("TRL environment_factory unavailable")
-    required = {"max_tool_calling_iterations", "chat_template_kwargs", "mask_truncated_completions"}
-    if required - set(inspect.signature(GRPOConfig).parameters):
-        raise RuntimeError("Installed GRPOConfig is incompatible")
     assert correct(r"FINAL_ANSWER: \boxed{\frac{1}{2}}", "0.5")
     assert not correct("My working contains 42", "42")
-    model_cfg = transformers.AutoConfig.from_pretrained(config["base_model"])
+    revision = config.get("base_model_revision")
+    if not revision and not Path(config["base_model"]).is_dir():
+        raise RuntimeError("Freeze base_model_revision with freeze-config before a GPU run")
+    model_cfg = transformers.AutoConfig.from_pretrained(config["base_model"], revision=revision)
     if model_cfg.model_type == "qwen3_5" and not hasattr(transformers, "Qwen3_5ForCausalLM"):
         raise RuntimeError("Transformers lacks Qwen3.5 text-only support")
     from .backend import configure_tokenizer, render
-    tok = configure_tokenizer(transformers.AutoTokenizer.from_pretrained(config["base_model"]))
+    tok = configure_tokenizer(transformers.AutoTokenizer.from_pretrained(config["base_model"], revision=revision))
     from .protocol import SYSTEM, tool_schemas
     render(tok, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "Compute 1+1."}], tool_schemas())
     # TRL needs a response parser in addition to a generation chat template.
@@ -74,6 +71,9 @@ def main():
     prep.add_argument("--seed", type=int, default=42)
     for name in ("numina", "aime2026", "beyondaime"):
         prep.add_argument("--local-" + name, help="Optional local source JSONL, mainly for offline tests")
+    freeze = sub.add_parser("freeze-config", help="Resolve an immutable model revision before all runs")
+    freeze.add_argument("--config", required=True)
+    freeze.add_argument("--out", required=True)
     check = sub.add_parser("doctor")
     check.add_argument("--config", required=True)
     check.add_argument("--out", default="environment_report.json")
@@ -93,7 +93,7 @@ def main():
     loop.add_argument("--config", required=True)
     loop.add_argument("--data-dir", required=True)
     loop.add_argument("--out", required=True)
-    loop.add_argument("--arm", choices=("dynamic_rl", "dynamic_sft", "static_rl", "success_rl"), default="dynamic_rl")
+    loop.add_argument("--arm", choices=SFT_ARMS, default="dynamic_sft")
     loop.add_argument("--rounds", type=int, default=2)
     loop.add_argument("--checkpoint")
     loop.add_argument("--resume", action="store_true")
@@ -111,8 +111,27 @@ def main():
     report = sub.add_parser("report", help="Recompute CSV/LaTeX tables and PDF/PNG figures from observed records")
     report.add_argument("--runs", nargs="+", required=True)
     report.add_argument("--out", required=True)
+    ready = sub.add_parser("paper-check", help="Validate completed matched SFT experiments and regenerate the report")
+    ready.add_argument("--runs", nargs="+", required=True)
+    ready.add_argument("--out", required=True)
+    ready.add_argument("--min-seeds", type=int, default=2)
+    estimate = sub.add_parser("pilot-cost", help="Estimate collection/dev runtime from observed pilot timing")
+    estimate.add_argument("--collect-dir", required=True)
+    estimate.add_argument("--diagnose-dir", required=True)
+    for name, default in (("train-size", 128), ("dev-size", 64), ("arms", 2), ("seeds", 2), ("rounds", 2)):
+        estimate.add_argument("--" + name, type=int, default=default)
     args = p.parse_args()
-    if args.command == "wandb-check":
+    if args.command == "freeze-config":
+        cfg = load_config(args.config)
+        if not Path(cfg["base_model"]).is_dir():
+            from huggingface_hub import HfApi
+            cfg["base_model_revision"] = HfApi().model_info(cfg["base_model"], revision=cfg.get("base_model_revision")).sha
+        target = Path(args.out)
+        if target.exists() and json.loads(target.read_text()) != cfg:
+            raise ValueError("Frozen config already differs; use a fresh output")
+        write_json(str(target), cfg)
+        result = cfg
+    elif args.command == "wandb-check":
         from .telemetry import Monitor, metrics
         from .wandb_tracking import tracking_mode
         if tracking_mode() == "disabled":
@@ -138,6 +157,15 @@ def main():
         result = evaluate_suite(args.run_dir, args.data_dir, args.dry_run)
         if args.dry_run:
             return
+    elif args.command == "pilot-cost":
+        from .analysis import pilot_cost
+        result = pilot_cost(args.collect_dir, args.diagnose_dir, args.train_size, args.dev_size, args.arms, args.seeds, args.rounds)
+    elif args.command == "paper-check":
+        from .readiness import paper_check
+        result = paper_check(args.runs, args.out, args.min_seeds)
+        if not result["complete"]:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            raise SystemExit(2)
     elif args.command == "report":
         from .reporting import generate_report
         result = generate_report(args.runs, args.out)

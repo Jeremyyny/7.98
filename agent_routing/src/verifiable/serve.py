@@ -15,12 +15,15 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
     p.add_argument("--checkpoint")
+    p.add_argument("--revision", help="Pinned HF model revision for a frozen experiment")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--max-context", type=int, default=16384)
     args = p.parse_args()
-    backend = HFBackend(args.model, args.checkpoint, args.max_context)
+    backend = HFBackend(args.model, args.checkpoint, args.max_context, revision=args.revision)
     from .runner import checkpoint_identity
-    fingerprint = {"model": args.model, "checkpoint": checkpoint_identity(args.checkpoint or args.model),
+    from .provenance import harness_identity
+    fingerprint = {"model": args.model, "requested_revision": args.revision, "checkpoint": checkpoint_identity(args.checkpoint or args.model),
+                   "harness": harness_identity(),
                    "resolved_revision": getattr(backend.model.config, "_commit_hash", None),
                    "template_sha256": hashlib.sha256(Path(__file__).with_name("chat_template.jinja").read_bytes()).hexdigest()}
 

@@ -30,7 +30,9 @@ class Backend:
     def generate(self, history, tools=None, **kwargs):
         self.inputs.append(deepcopy(history))
         helped = any(m.get("role") == "tool" and m.get("name") == "reasoner_tool" for m in history)
-        if tools and not helped:
+        if tools and helped:
+            text = "COMMIT"
+        elif tools:
             text = '<tool_call>{"name":"reasoner_tool","arguments":{}}</tool_call>'
         else:
             text = "A full derivation with intermediate steps.\nFINAL_ANSWER: \\boxed{" + ("42" if helped else self.initial) + "}"
@@ -118,7 +120,7 @@ class CounterfactualTest(unittest.TestCase):
         for branch in record["branches"]:
             self.assertEqual(branch["steps"][0]["prompt"], record["base_messages"])
         turns = sft_rows([record])
-        self.assertEqual([r["decision_type"] for r in turns], ["call", "commit", "independent_solution"])
+        self.assertEqual([r["decision_type"] for r in turns], ["call", "revision", "commit", "independent_solution"])
         self.assertIn("intermediate steps", turns[-1]["response"][0]["content"])
         self.assertNotIn("Useful advice", json.dumps(turns[-1]["prompt"]))
         self.assertEqual(summary([record])["measured_union_coverage"], 1)
@@ -169,9 +171,9 @@ class CounterfactualTest(unittest.TestCase):
 
 
 class ProtocolTest(unittest.TestCase):
-    def test_both_qwen_call_forms(self):
+    def test_json_subagent_calls(self):
         for text in ['<tool_call>{"name":"reasoner_tool","arguments":{}}</tool_call>',
-                     '<tool_call><function=verifier_tool><parameter=current_draft>x=2</parameter></function></tool_call>']:
+                     '<tool_call>{"name":"verifier_tool","arguments":{}}</tool_call>']:
             _, calls = parse_calls(text)
             self.assertEqual(len(calls), 1)
         for text in ['<tool_call>{bad}</tool_call>', '<tool_call>{"name":"wrong","arguments":{}}</tool_call>', '<tool_call>']:
@@ -193,11 +195,11 @@ class ProtocolTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "cfg.json"
             config.write_text(json.dumps(CFG))
-            plan = build_plan(config, tmp, str(Path(tmp) / "run"), "dynamic_rl", 2)
+            plan = build_plan(config, tmp, str(Path(tmp) / "run"), "dynamic_sft", 2)
             collects = [p for p in plan if p["stage"] == "collect"]
             self.assertEqual(len(collects), 2)
-            self.assertIn(str((Path(tmp) / "run/round_1/rl").resolve()), collects[1]["command"])
-            fixed = build_plan(config, tmp, str(Path(tmp) / "fixed"), "static_rl", 2)
+            self.assertIn(str((Path(tmp) / "run/round_1/sft").resolve()), collects[1]["command"])
+            fixed = build_plan(config, tmp, str(Path(tmp) / "fixed"), "static_sft", 2)
             self.assertEqual(sum(p["stage"] == "collect" for p in fixed), 1)
             self.assertFalse(any("aime2026.jsonl" in str(p) for p in plan))
 

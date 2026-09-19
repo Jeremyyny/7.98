@@ -39,29 +39,11 @@ commit with each run, and restart existing subagent processes to load the change
 Do not resume a partial experiment across prompt versions or combine its scores
 with earlier runs as if the prompts were unchanged.
 
-## What the math implementation currently measures
+## Math protocol v2
 
-- `collect_one` compares bounded delegation branches starting from a shared
-  Manager draft. `build_plan` repeats collection and dev diagnostics across
-  training rounds for the dynamic arms.
-- `compare`, `reporting.py`, and `log_diagnostic` track a fixed initial dev cohort
-  that was independently incorrect but had a successful delegation branch. They
-  measure how many of those held-out questions become independently correct,
-  alongside overall gains and regressions. W&B logs the internalization counts
-  and rate when the cohort is nonempty.
-- Mean policy calls are available. Call rates on currently independently correct
-  questions and on the initial rescue cohort after it becomes independently
-  correct are not yet separate reported metrics. Policy rescue rates on questions
-  that still need help also need a separate breakdown.
-
-This supports measuring changes in independent success and bounded delegation
-coverage. It does not yet provide the full analysis needed to show that the
-learned policy reduces unnecessary delegation as capability changes. Internalization
-here is an operational measure of held-out answer correctness, not verification
-of every reasoning step or proof of general capability acquisition.
-
-The current policy can generate a revised answer when it chooses no tool, whereas
-counterfactual direct success is measured on the stored initial draft. Strict
-COMMIT semantics or an explicit self-revision control is needed before attributing
-all policy gains to delegation. This prompt update does not change that protocol,
-training-arm selection, or training budgets.
+The math experiment now uses immutable COMMIT, separate revision turns, and
+an environment-bound Verifier candidate. Tools have empty arguments. SFT-only
+controls, fixed-cohort internalization, conditional call metrics, state transitions
+and paired arm comparisons are implemented. See [MATH_RUNPOD.md](MATH_RUNPOD.md)
+and [MATH_AUDIT.md](MATH_AUDIT.md) for definitions and validation boundaries.
+The legacy GRPO path is blocked under this protocol.
