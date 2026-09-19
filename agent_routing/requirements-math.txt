@@ -10,3 +10,4 @@ requests>=2.32,<3
 pydantic>=2,<3
 jmespath>=1,<2
 matplotlib>=3.9,<4
+wandb==0.30.0

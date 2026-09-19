@@ -77,6 +77,8 @@ def main():
     check = sub.add_parser("doctor")
     check.add_argument("--config", required=True)
     check.add_argument("--out", default="environment_report.json")
+    wb = sub.add_parser("wandb-check", help="Check W&B login/logging without a GPU or model")
+    wb.add_argument("--out", required=True)
     for name in ("collect", "diagnose", "evaluate", "sft", "rl"):
         sp = sub.add_parser(name)
         sp.add_argument("--config", required=True)
@@ -110,7 +112,26 @@ def main():
     report.add_argument("--runs", nargs="+", required=True)
     report.add_argument("--out", required=True)
     args = p.parse_args()
-    if args.command == "status":
+    if args.command == "wandb-check":
+        from .telemetry import Monitor, metrics
+        from .wandb_tracking import tracking_mode
+        if tracking_mode() == "disabled":
+            raise ValueError("Set MARGENT_WANDB_MODE=online or offline before wandb-check")
+        root = Path(args.out)
+        root.mkdir(parents=True, exist_ok=True)
+        manifest = {"config": {"purpose": "logging_check_only_no_model_or_training"}}
+        target = root / "run.json"
+        if target.exists():
+            if json.loads(target.read_text()) != manifest:
+                raise ValueError("Choose a separate directory for the W&B check")
+        elif any(root.iterdir()):
+            raise ValueError("Choose an empty directory for the W&B check")
+        else:
+            write_json(str(target), manifest)
+        with Monitor(root, "tracking_check"):
+            metrics({"logging_check": 1}, "check")
+        result = json.loads((root / "wandb_link.json").read_text())
+    elif args.command == "status":
         from .telemetry import status_snapshot
         result = status_snapshot(args.run_dir)
     elif args.command == "evaluate-suite":

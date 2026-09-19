@@ -15,7 +15,7 @@ from ..utils.io import append_jsonl, read_jsonl, write_json, write_jsonl
 from .backend import HFBackend, HTTPAdvisors
 from .data import identity, load_rows, verify_manifest
 from .experiment import collect_one, compare, policy_rollout, root_state, sft_rows, summary
-from .telemetry import Monitor, atomic_json, progress
+from .telemetry import Monitor, atomic_json, progress, metrics
 
 
 def _digest(path):
@@ -107,6 +107,7 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
         append_jsonl(str(root / "attempts.jsonl"), [{"completed_examples_this_attempt": len(pending),
                                                    "wall_seconds": time.monotonic() - started}])
         write_json(str(root / "summary.json"), result)
+        metrics(result, "eval", diagnostic_step=len(records))
         return result
 
 
@@ -168,6 +169,8 @@ def run_loop(config_path, data_dir, output, arm, rounds, initial=None, resume=Fa
             if not (Path(step["output"]) / ".stage_complete.json").exists():
                 verify_advisor(signature["config"], root)
             execute_stage(step, root / "logs")
+            if step["stage"] == "diagnose":
+                log_diagnostic(root, step, sum(p["stage"] == "diagnose" for p in plan[:i + 1]) - 1)
         checkpoints = [step for step in plan if step["stage"] == "diagnose"]
         reports = []
         before = read_jsonl(str(Path(checkpoints[0]["output"]) / "records.jsonl"))
@@ -177,6 +180,25 @@ def run_loop(config_path, data_dir, output, arm, rounds, initial=None, resume=Fa
                             "summary": json.loads((Path(step["output"]) / "summary.json").read_text())})
         write_json(str(root / "loop_report.json"), reports)
         return reports
+
+
+def log_diagnostic(root, step, index):
+    """Publish each completed checkpoint immediately, including resumed stages."""
+    output = Path(step["output"])
+    result = json.loads((output / "summary.json").read_text())
+    metrics(result, "eval", diagnostic_step=index)
+    initial = Path(root) / "initial_dev" / "records.jsonl"
+    before = read_jsonl(str(initial))
+    after = read_jsonl(str(output / "records.jsonl"))
+    comparison = compare(before, after)
+    rescued = sum(not r["direct_correct"] and any(b["correct"] for b in r["branches"]) for r in before)
+    gained = len(comparison["previously_rescued_now_independent"])
+    values = {"initial_rescued_n": rescued, "rescued_now_independent_n": gained,
+              "newly_solved_n": len(comparison["independent"]["newly_solved"]),
+              "regressed_n": len(comparison["independent"]["regressed"])}
+    if rescued:
+        values["rescued_now_independent_rate"] = gained / rescued
+    metrics(values, "internalization", diagnostic_step=index)
 
 
 def execute_stage(step, log_dir):
@@ -258,6 +280,9 @@ def evaluate_suite(run_dir, data_dir, dry_run=False):
             if not (Path(step["output"]) / ".stage_complete.json").exists():
                 verify_advisor(run["config"], root)
             execute_stage(step, root / "logs")
+            path = Path(step["output"])
+            result = json.loads((path / "summary.json").read_text())
+            metrics(result, f"test/{path.parent.name}/{path.name}", diagnostic_step=i)
     return {"evaluations": [p["output"] for p in plan]}
 
 
