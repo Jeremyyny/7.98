@@ -134,7 +134,20 @@ completed SFT update budgets and locked initial/final external tests. It emits
 protocol completeness, not positive results, statistical significance or a
 publication guarantee. It is not a validator of all generated reasoning steps.
 
-W&B is optional (`MARGENT_WANDB_MODE=online`, `offline`, or `disabled`). Raw records
-and weights remain local. Online runs resume their stage identity; offline
-attempts have separate IDs under a shared group. Loss uses `trainer_step`; dev and
-conditional delegation metrics use `diagnostic_step`.
+W&B is optional (`MARGENT_WANDB_MODE=online`, `offline`, or `disabled`). Scalar
+metrics and configuration are the default. `MARGENT_WANDB_TEXT=1` additionally
+uploads question/answer and per-generation text tables; weights remain local.
+Local `generations.jsonl` is written before truncation errors so incomplete
+questions retain their advisor output. Text-upload errors do not turn into math
+labels or replace the original generation error. Tables use incremental uploads,
+separate attempt suffixes on resume, and explicit display limits (10000 rows and
+20000 characters per cell by default; full text stays local).
+`wandb-upload-records --run-dir STAGE --out NEW_REVIEW_DIR` creates a model-free
+review run from existing records without altering the source experiment.
+Older cost records lack some prompts/phase details; these remain unknown, and
+outputs never saved by the old code cannot be recovered. The review preserves
+source hashes, configuration and harness identity without recomputing labels.
+See `MATH_RUNPOD_QUICKSTART.md` for table fields, limits and migration commands.
+Online runs resume their stage identity; offline attempts have separate IDs
+under a shared group. Loss uses `trainer_step`; dev and conditional delegation
+metrics use `diagnostic_step`.

@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 from .protocol import advisor_messages
-from .telemetry import usage, progress
+from .telemetry import generation, usage, progress
 
 
 def configure_tokenizer(tok):
@@ -141,6 +141,8 @@ class HTTPAdvisors:
             value = dict(self.cache[key])
             value.update(cache_hit=True, actual_completion_tokens=0, actual_prompt_tokens=0, seconds=0.)
             usage("advisor", value, advisor=kind)
+            generation("advisor", value, messages=msgs, advisor=kind, max_tokens=self.max_tokens,
+                       operation="advice")
             return value
         start = time.monotonic()
         response = requests.post(self.url + "/v1/chat/completions", json=body, timeout=self.timeout)
@@ -162,6 +164,8 @@ class HTTPAdvisors:
                   "seconds": time.monotonic() - start, "cache_hit": False,
                   "truncated": data["choices"][0].get("finish_reason") == "length"}
         usage("advisor", result, advisor=kind, advisor_identity=fingerprint)
+        generation("advisor", result, messages=msgs, advisor=kind, max_tokens=self.max_tokens,
+                   operation="advice", error="advisor_output_truncated" if result["truncated"] else None)
         if result["truncated"]:
             raise RuntimeError("Advisor output truncated; increase advisor_max_tokens before collecting labels")
         self.cache[key] = result

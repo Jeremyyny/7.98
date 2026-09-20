@@ -42,6 +42,7 @@ class Monitor:
         self.tracker = WandbTracker(self.root, stage, self.attempt)
         self.wandb_failed = False
         self.totals = {}
+        self.question = {}
         self.state = {"schema_version": 1, "stage": stage, "attempt": self.attempt,
                       "status": "running", "started_at": now(), "pid": os.getpid(),
                       "hostname": socket.gethostname(), "progress": {}}
@@ -123,10 +124,53 @@ class Monitor:
         try:
             self.tracker.log(values)
         except Exception as exc:
-            self.wandb_failed = True
-            self.state["wandb_status"] = "upload_error_local_logs_retained"
-            self.event("wandb_warning", error_type=type(exc).__name__)
-            print("[wandb] Upload failed; training continues with local logs. Check events.jsonl.", flush=True)
+            self.wandb_warning(exc)
+
+    def wandb_warning(self, exc):
+        self.wandb_failed = True
+        self.state["wandb_status"] = "upload_error_local_logs_retained"
+        self.event("wandb_warning", error_type=type(exc).__name__)
+        print("[wandb] Upload failed; computation continues with local logs. Check events.jsonl.", flush=True)
+
+    def set_question(self, row):
+        from .data import identity
+        self.question = {"question_hash": identity(row.question), "question": row.question,
+                         "context": row.context, "ground_truth": row.ground_truth}
+
+    def generation(self, role, value, messages=None, **extra):
+        fields = ("text", "valid", "truncated", "prompt_tokens", "completion_tokens",
+                  "actual_prompt_tokens", "actual_completion_tokens", "seconds", "cache_hit")
+        record = {k: value[k] for k in fields if k in value}
+        record.update(self.question, source="live", attempt=self.attempt, role=role, time=now(),
+                      phase=self.state["progress"].get("phase"),
+                      sequence=list(self.state["progress"].get("sequence", [])), messages=messages)
+        record.update({k: extra[k] for k in ("advisor", "operation", "max_tokens", "error") if k in extra})
+        with self.lock:
+            # Save before the caller can raise for truncation or fail the question.
+            append_jsonl(str(self.root / "generations.jsonl"), [record])
+            self.log_text("generation", record)
+
+    def log_text(self, kind, record):
+        if self.wandb_failed:
+            return
+        with self.lock:
+            try:
+                self.tracker.log_text(kind, record)
+            except Exception as exc:
+                self.wandb_warning(exc)
+
+    def completed_question(self, record, source="live"):
+        self.log_text("question", {**record, "source": source})
+        self.flush_tables(force=True)
+
+    def flush_tables(self, force=False):
+        if self.wandb_failed:
+            return
+        with self.lock:
+            try:
+                self.tracker.flush_tables(force=force)
+            except Exception as exc:
+                self.wandb_warning(exc)
 
     def metrics(self, values, namespace="", **axes):
         values = {**scalar_metrics(values, namespace), **scalar_metrics(axes)}
@@ -142,6 +186,7 @@ class Monitor:
                     self.log_wandb({"system/elapsed_seconds": self.state["elapsed_seconds"],
                                     "system/disk_free_gib": self.state["disk_free_bytes"] / 2 ** 30,
                                     **scalar_metrics(self.state["progress"], "progress"), **self.totals})
+                    self.flush_tables()
                 result = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid,memory.used,memory.total,utilization.gpu,power.draw",
                                          "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
@@ -182,10 +227,12 @@ class Monitor:
         self.update()
         try:
             self.log_wandb({**self.totals, "system/elapsed_seconds": elapsed})
+            self.flush_tables(force=True)
             self.tracker.finish(status)
         except Exception as exc:
-            self.event("wandb_warning", error_type=type(exc).__name__)
+            self.wandb_warning(exc)
         finally:
+            self.update()
             ACTIVE = self.previous
 
 
@@ -197,6 +244,21 @@ def progress(**values):
 def usage(role, value, **extra):
     if ACTIVE:
         ACTIVE.usage(role, value, **extra)
+
+
+def question_context(row):
+    if ACTIVE:
+        ACTIVE.set_question(row)
+
+
+def generation(role, value, messages=None, **extra):
+    if ACTIVE:
+        ACTIVE.generation(role, value, messages, **extra)
+
+
+def completed_question(record):
+    if ACTIVE:
+        ACTIVE.completed_question(record)
 
 
 def metrics(values, namespace="", **axes):

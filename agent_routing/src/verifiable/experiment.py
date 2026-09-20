@@ -10,7 +10,7 @@ from .answers import correct, extract_final
 from .data import identity
 from .protocol import (COMMIT, DECIDE, REVISE, KINDS, PROTOCOL_VERSION,
                        call_message, messages, parse_calls, tool_schemas)
-from .telemetry import progress
+from .telemetry import generation, progress
 
 
 def candidate(text):
@@ -24,6 +24,10 @@ def _draw(backend, history, cfg, seed, tools=None, budget=None):
     result["valid"] = (not result.get("truncated", False)
                        and extract_final(result["text"]) is not None
                        and not any(token in result["text"] for token in ("<tool_call", "<|im_start|>", "<|im_end|>")))
+    # Decisions are validated by parse_calls, not by the final-answer rule.
+    generation("manager", {**result, "valid": None} if tools else result,
+               messages=history, max_tokens=budget or cfg["max_new_tokens"],
+               operation="decision" if tools else "answer")
     return result
 
 
@@ -43,7 +47,7 @@ def decision_history(history, draft):
 
 
 def root_state(row, backend, cfg, seed):
-    progress(phase="independent", question_hash=identity(row.question))
+    progress(phase="independent", question_hash=identity(row.question), sequence=[])
     root = _draw(backend, messages(row, direct=True), cfg, seed)
     return root, decision_history(messages(row, max_calls=cfg.get("max_depth", 2)), root["text"])
 
@@ -147,6 +151,7 @@ def collect_one(row, backend, advisors, cfg, seed, evaluate_policy=False):
         record["costs"].extend(record["policy"]["costs"])
         # One self-revision control; ceiling matches ONE advisor plus one revision.
         # This is not a full multi-call equal-compute baseline.
+        progress(phase="self_continue", sequence=[])
         revision = _draw(backend, base + [{"role": "user", "content": REVISE}], cfg,
                         branch_seed(seed, ["self_continue"]),
                         budget=cfg["max_new_tokens"] + cfg["advisor_max_tokens"])
