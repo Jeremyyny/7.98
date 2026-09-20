@@ -23,7 +23,8 @@ def source(tmp_path):
 
 
 @pytest.mark.parametrize("identical", [False, True])
-def test_replay_uses_exact_failed_messages_and_keeps_source_unchanged(tmp_path, monkeypatch, identical):
+@pytest.mark.parametrize("selected", [None, "fixed_sampled", "native_sampled"])
+def test_replay_uses_exact_failed_messages_and_keeps_source_unchanged(tmp_path, monkeypatch, identical, selected):
     stage, record = source(tmp_path)
     before = {p.name: p.read_bytes() for p in stage.iterdir()}
     out = tmp_path / "review"
@@ -47,18 +48,24 @@ def test_replay_uses_exact_failed_messages_and_keeps_source_unchanged(tmp_path, 
                 "truncated": not sampled, "prompt_sha256": tok.chat_template,
                 "rendered_prompt": "actual template and saved messages"}
     monkeypatch.setattr(replay, "draw", draw)
-    monkeypatch.setattr(sys, "argv", ["replay", "--run-dir", str(stage), "--out", str(out)])
+    argv = ["replay", "--run-dir", str(stage), "--out", str(out)]
+    if selected:
+        argv += ["--variants", selected, "--max-tokens", "2048"]
+    monkeypatch.setattr(sys, "argv", argv)
     replay.main()
     templates = ("fixed",) if identical else ("fixed", "native")
-    assert calls == [(t, s, 512, 42) for t in templates for s in (False, True)]
+    expected = ([(selected.split("_")[0], True, 2048, 42)] if selected else
+                [(t, s, 512, 42) for t in templates for s in (False, True)])
+    assert calls == expected
     assert before == {p.name: p.read_bytes() for p in stage.iterdir()}
     summary = json.loads((out / "replay_summary.json").read_text())
-    assert len(summary) == 2 * len(templates)
-    assert sum(r["truncated"] for r in summary) == len(templates)
+    assert len(summary) == len(expected)
+    assert sum(r["truncated"] for r in summary) == (0 if selected else len(templates))
     rows = [json.loads(line) for line in (out / "generations.jsonl").read_text().splitlines()]
-    assert [r["phase"] for r in rows] == [v[0] for v in replay.variants() if v[1] in templates]
+    assert [r["phase"] for r in rows] == ([selected] if selected else
+                                          [v[0] for v in replay.variants() if v[1] in templates])
     assert all(r["operation"] == "diagnostic_replay" for r in rows)
-    assert json.loads((out / "fixed_sampled.json").read_text())["raw_text"].endswith("<|im_end|>")
+    assert json.loads((out / ((selected or "fixed_sampled") + ".json")).read_text())["raw_text"].endswith("<|im_end|>")
     assert not (out / "records.jsonl").exists()
 
 

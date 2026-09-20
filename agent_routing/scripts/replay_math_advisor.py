@@ -102,6 +102,8 @@ def main():
     p.add_argument("--out", required=True, help="New directory outside experiment loops")
     p.add_argument("--max-tokens", type=int, default=512)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--variants", nargs="+", choices=[v[0] for v in variants()],
+                   default=[v[0] for v in variants()], help="Run only these conditions")
     args = p.parse_args()
     if not 1 <= args.max_tokens <= 4096:
         p.error("--max-tokens must be between 1 and 4096")
@@ -117,7 +119,7 @@ def main():
         "source_stage": str(stage), "source_sha256": digest, "original_config": cfg,
         "source_attempt": record.get("attempt"), "source_question_hash": record.get("question_hash"),
         "max_tokens": args.max_tokens, "seed": args.seed,
-        "variants": [v[0] for v in variants()],
+        "variants": list(dict.fromkeys(args.variants)),
         "sampled_parameters": {"temperature": 0.7, "top_p": 0.8, "top_k": 20,
                                "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0},
         "note": "One seed and one saved input cannot establish general correctness; cap differs from source.",
@@ -137,17 +139,19 @@ def main():
         identical = (rendered[0] == rendered[1]
                      and backend.tokenizer.eos_token_id == native.eos_token_id
                      and backend.tokenizer.pad_token_id == native.pad_token_id)
+        skipped = [name for name in args.variants if identical and name.startswith("native_")
+                   and name.replace("native_", "fixed_", 1) in args.variants]
         atomic_json(output / "template_comparison.json", {
             "identical_rendering_and_endings": identical,
             "fixed_prompt": rendered[0], "native_prompt": rendered[1],
-            "skipped_equivalent_variants": ["native_greedy", "native_sampled"] if identical else [],
+            "skipped_equivalent_variants": skipped,
         })
         print("Fixed/native prompt rendering and ending IDs identical:", identical, flush=True)
         monitor.set_question(SimpleNamespace(question=record.get("question", ""),
                              context=record.get("context", ""), ground_truth=record.get("ground_truth")))
         results = []
         for name, template, sampled in variants():
-            if identical and template == "native":
+            if name not in args.variants or name in skipped:
                 continue
             monitor.update(phase=name, sequence=record.get("sequence", []))
             tok = backend.tokenizer if template == "fixed" else native
