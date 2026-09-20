@@ -78,7 +78,18 @@ def advisor_messages(kind, row, draft):
     instructions = {
         "extractor": "Extract givens, constraints, variables and useful equivalent formulations.",
         "reasoner": "Develop a useful solution approach with intermediate deductions based on relevant principles.",
-        "verifier": "Audit the supplied derivation. Identify specific invalid steps and suggest repairs.",
+        "verifier": (
+            "Check whether the supplied derivation is mathematically correct. "
+            "It may be entirely correct; being asked to audit it does not imply an error. "
+            "Do not invent errors or treat optional wording improvements as mathematical errors. "
+            "Give one concise final audit with three fields: "
+            "Verdict: correct, incorrect, or uncertain; "
+            "Evidence: the decisive check or specific invalid step; "
+            "Correction: a needed mathematical repair, or 'None needed' if correct. "
+            "If uncertain, state the unresolved issue instead of forcing a verdict or repair. "
+            "Report the conclusion and supporting evidence, not a running self-dialogue. "
+            "Do not repeatedly reopen a settled check; end after the audit."
+        ),
     }
     return [{"role": "system", "content": "You are a reasoning sub-agent. Use the subject matter of the supplied question. " + instructions[kind]
              + " Give concise concrete help. You have no answer key. Do not use tools."},
