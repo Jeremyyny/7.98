@@ -109,16 +109,28 @@ class GenerationEndingsTest(unittest.TestCase):
                 return Output(self.ids)
         backend = HFBackend.__new__(HFBackend)
         backend.tokenizer, backend.model, backend.max_context = Tokenizer(), Model(), 100
+        seeds = []
         fake_torch = SimpleNamespace(random=SimpleNamespace(fork_rng=lambda devices: nullcontext()),
-                                     inference_mode=nullcontext, manual_seed=lambda _: None)
-        with patch.dict("sys.modules", {"torch": fake_torch}):
-            for ids, truncated in (([1, 7], False), ([1, 2], True)):
+                                     inference_mode=nullcontext, manual_seed=seeds.append)
+        sampled = {"temperature": 0.7, "seed": 43, "top_p": 0.8, "top_k": 20,
+                   "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0}
+        with patch.dict("sys.modules", {"torch": fake_torch,
+                                        "transformers": SimpleNamespace(LogitsProcessorList=list)}):
+            for ids, truncated, settings in (([1, 7], False, None), ([1, 2], True, None),
+                                             ([1, 7], False, sampled)):
                 backend.model.ids = ids
-                result = backend.generate([], max_tokens=2)
+                result = backend.generate([], max_tokens=2, generation_options=settings)
                 self.assertEqual(backend.model.kwargs["eos_token_id"], 7)
                 self.assertEqual(result["truncated"], truncated)
                 self.assertEqual(result["completion_tokens"], 2)
                 self.assertEqual(result["text"], r"FINAL_ANSWER: \boxed{25}")
+                self.assertEqual(backend.model.kwargs["do_sample"], settings is not None)
+                if settings:
+                    self.assertEqual(seeds[-1], 43)
+                    self.assertEqual(backend.model.kwargs["temperature"], 0.7)
+                    self.assertEqual(backend.model.kwargs["top_p"], 0.8)
+                    self.assertEqual(backend.model.kwargs["top_k"], 20)
+                    self.assertEqual(len(backend.model.kwargs["logits_processor"]), 1)
 
 
 class AnswersTest(unittest.TestCase):

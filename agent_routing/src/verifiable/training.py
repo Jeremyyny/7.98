@@ -251,7 +251,8 @@ def _legacy_train_rl(config, checkpoint, data_path, output):
             root_costs.append({k: root[k] for k in ("prompt_tokens", "completion_tokens", "seconds", "truncated")})
         append_jsonl(str(Path(output) / "root_generation_usage.jsonl"), root_costs)
         model.train()
-        advisors = HTTPAdvisors(config["advisor_url"], config["advisor_max_tokens"], config.get("advisor_models"))
+        advisors = HTTPAdvisors(config["advisor_url"], config["advisor_max_tokens"], config.get("advisor_models"),
+                               generation_options=config.get("advisor_generation"))
         count = config.get("num_generations", 4)
         accumulation = config.get("rl_accumulation", count)
         if accumulation % count:

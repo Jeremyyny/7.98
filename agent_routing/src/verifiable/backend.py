@@ -8,6 +8,7 @@ import time
 
 from .protocol import advisor_messages
 from .telemetry import generation, usage, progress
+from .sampling import normalize_generation, generation_kwargs
 
 
 def configure_tokenizer(tok):
@@ -108,8 +109,11 @@ class HFBackend:
         self.tokenizer, self.model = load_model(base_model, checkpoint, revision=revision)
         self.max_context = max_context
 
-    def generate(self, messages, tools=None, max_tokens=2048, temperature=0.0, seed=42):
+    def generate(self, messages, tools=None, max_tokens=2048, temperature=0.0, seed=42,
+                 generation_options=None):
         import torch
+        settings = normalize_generation({"temperature": temperature, "seed": seed,
+                                         **(generation_options or {})})
         prompt = render(self.tokenizer, messages, tools)
         inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self.model.device)
         n = inputs["input_ids"].shape[1]
@@ -118,11 +122,11 @@ class HFBackend:
         devices = [self.model.device.index or 0] if self.model.device.type == "cuda" else []
         start = time.monotonic()
         with torch.random.fork_rng(devices=devices), torch.inference_mode():
-            torch.manual_seed(seed)
+            torch.manual_seed(settings["seed"])
             out = self.model.generate(**inputs, max_new_tokens=max_tokens,
-                do_sample=temperature > 0, pad_token_id=self.tokenizer.pad_token_id,
+                pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                **({"temperature": temperature} if temperature > 0 else {}))
+                **generation_kwargs(settings, n))
         ids = out[0, n:]
         # Stop on the same ChatML EOS used by the tokenizer/template, rather
         # than a potentially different model-level generation default.
@@ -142,18 +146,20 @@ class HTTPAdvisors:
     HTTP/network/format errors raise instead of becoming incorrect math labels.
     Endpoint model aliases can point to one frozen model or separate adapters.
     """
-    def __init__(self, url, max_tokens=1024, models=None, timeout=600):
+    def __init__(self, url, max_tokens=1024, models=None, timeout=600, generation_options=None):
         self.url = url.rstrip("/")
         self.max_tokens = max_tokens
         self.models = models or {k: k for k in ("extractor", "reasoner", "verifier")}
         self.timeout = timeout
         self.cache = {}
         self.identity = None
+        self.generation_options = normalize_generation(generation_options)
+        self.require_generation_echo = generation_options is not None
 
     def call(self, kind, row, draft=""):
         import requests
         msgs = advisor_messages(kind, row, draft)
-        body = {"model": self.models[kind], "messages": msgs, "temperature": 0,
+        body = {"model": self.models[kind], "messages": msgs, **self.generation_options,
                 "max_tokens": self.max_tokens, "chat_template_kwargs": {"enable_thinking": False}}
         key = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
         if key in self.cache:
@@ -167,6 +173,9 @@ class HTTPAdvisors:
         response = requests.post(self.url + "/v1/chat/completions", json=body, timeout=self.timeout)
         response.raise_for_status()
         data = response.json()
+        if (self.require_generation_echo
+                and data.get("margent_generation") != self.generation_options):
+            raise RuntimeError("Advisor did not confirm requested generation settings; restart the updated server")
         fingerprint = data.get("margent_advisor")
         if self.identity is not None and fingerprint != self.identity:
             raise RuntimeError("Advisor identity changed during the stage")
@@ -182,7 +191,8 @@ class HTTPAdvisors:
                   "actual_completion_tokens": int(counts["completion_tokens"]),
                   "seconds": time.monotonic() - start, "cache_hit": False,
                   "truncated": data["choices"][0].get("finish_reason") == "length"}
-        usage("advisor", result, advisor=kind, advisor_identity=fingerprint)
+        usage("advisor", result, advisor=kind, advisor_identity=fingerprint,
+              advisor_generation=self.generation_options)
         generation("advisor", result, messages=msgs, advisor=kind, max_tokens=self.max_tokens,
                    operation="advice", error="advisor_output_truncated" if result["truncated"] else None)
         if result["truncated"]:

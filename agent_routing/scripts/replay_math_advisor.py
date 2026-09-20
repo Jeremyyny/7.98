@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.verifiable.backend import HFBackend, strip_generation_endings
 from src.verifiable.telemetry import Monitor, atomic_json
+from src.verifiable.sampling import presence_penalty, generation_kwargs
 
 
 def load_failure(stage):
@@ -49,22 +50,8 @@ def variants():
             for template in ("fixed", "native") for decode in ("greedy", "sampled")]
 
 
-def presence_penalty(prompt_length, penalty):
-    # Penalize each distinct generated token once, never prompt tokens and never
-    # proportional to frequency. This is not a repetition-penalty multiplier.
-    class GeneratedPresencePenalty:
-        def __call__(self, input_ids, scores):
-            adjusted = scores.clone()
-            for batch in range(input_ids.shape[0]):
-                seen = input_ids[batch, prompt_length:].unique()
-                adjusted[batch, seen] -= penalty
-            return adjusted
-    return GeneratedPresencePenalty()
-
-
 def draw(model, tokenizer, messages, max_tokens, max_context, seed, sampled):
     import torch
-    from transformers import LogitsProcessorList
 
     prompt = tokenizer.apply_chat_template(messages, tokenize=False,
                                           add_generation_prompt=True, enable_thinking=False)
@@ -75,9 +62,8 @@ def draw(model, tokenizer, messages, max_tokens, max_context, seed, sampled):
     options = {"do_sample": sampled, "max_new_tokens": max_tokens,
                "eos_token_id": tokenizer.eos_token_id, "pad_token_id": tokenizer.pad_token_id}
     if sampled:
-        options.update(temperature=0.7, top_p=0.8, top_k=20, min_p=0.0,
-                       repetition_penalty=1.0,
-                       logits_processor=LogitsProcessorList([presence_penalty(n, 1.5)]))
+        options.update(generation_kwargs({"temperature": 0.7, "top_p": 0.8, "top_k": 20,
+                       "min_p": 0.0, "repetition_penalty": 1.0, "presence_penalty": 1.5}, n))
     devices = [model.device.index or 0] if model.device.type == "cuda" else []
     if devices:
         torch.cuda.synchronize(model.device)

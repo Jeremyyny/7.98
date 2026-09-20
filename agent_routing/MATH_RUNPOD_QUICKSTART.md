@@ -117,6 +117,29 @@ python -m src.verifiable freeze-config --config configs/math_rsi.json \
 
 ## 5. 在 GPU 0 启动冻结 subagent
 
+### 可选：冻结 advisor 采样设置
+
+默认仍为 greedy。若 smoke 诊断确认需要采样，可在**新运行目录的新配置**中加入：
+
+```json
+"advisor_generation": {
+  "temperature": 0.7,
+  "top_p": 0.8,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 1.5,
+  "repetition_penalty": 1.0,
+  "seed": 42
+}
+```
+
+该设置作用于三个冻结 advisor 角色，Manager 的 `temperature=0` 保持不变。
+每个请求重设固定 seed，缓存键包含完整生成设置；不会依据正确答案换种子重试。
+服务端回传生成参数供客户端核对，旧服务无法确认时会报错，必须重启同版 advisor。
+诊断重放和正式服务共用 presence penalty 实现，仅对已生成 token 各减一次对应 logit。
+参数属于实验协议，所有正式对照组应共用同一固定设置；不要把 greedy 和 sampled 的历史结果混为同一配置。
+保留原始回复和截断报错，不能只截取正确结论。一次失败请求在少数种子下不截断，不能证明整体可靠性。
+
 打开第二个终端或 tmux 会话；保持它运行。所有终端先进入相同目录并激活环境。
 
 ```bash

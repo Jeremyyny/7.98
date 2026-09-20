@@ -9,6 +9,17 @@ from pathlib import Path
 
 from .backend import HFBackend
 from .protocol import KINDS
+from .sampling import normalize_generation
+
+
+def generate_advisor_request(backend, request):
+    keys = {"temperature", "seed", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty"}
+    settings = normalize_generation({k: request[k] for k in keys if k in request})
+    budget = request["max_tokens"]
+    if type(budget) is not int or budget <= 0:
+        raise ValueError("max_tokens must be a positive integer")
+    result = backend.generate(request["messages"], max_tokens=budget, generation_options=settings)
+    return result, settings
 
 
 def main():
@@ -50,10 +61,11 @@ def main():
                 request = json.loads(self.rfile.read(length))
                 if request.get("model") not in KINDS:
                     return self.send_json(400, {"error": "Unknown frozen advisor alias"})
-                result = backend.generate(request["messages"], max_tokens=int(request["max_tokens"]))
+                result, settings = generate_advisor_request(backend, request)
                 self.send_json(200, {"choices": [{"message": {"role": "assistant", "content": result["text"]},
                     "finish_reason": "length" if result["truncated"] else "stop"}], "usage": {
-                    "prompt_tokens": result["prompt_tokens"], "completion_tokens": result["completion_tokens"]}, "margent_advisor": fingerprint})
+                    "prompt_tokens": result["prompt_tokens"], "completion_tokens": result["completion_tokens"]},
+                    "margent_advisor": fingerprint, "margent_generation": settings})
             except Exception as exc:
                 self.send_json(500, {"error": str(exc)})
 
