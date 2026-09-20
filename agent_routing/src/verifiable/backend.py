@@ -84,6 +84,25 @@ def render(tokenizer, messages, tools=None, generation=True):
            add_generation_prompt=generation, enable_thinking=False)
 
 
+def strip_generation_endings(text, tokenizer):
+    """Remove terminal EOS/padding only; preserve tool markers and answer text.
+
+    There may be multiple endings (for example ChatML EOS followed by padding).
+    A single pass over a set makes cleanup depend on iteration order and leaves
+    EOS behind when EOS and padding are the same token and occur repeatedly.
+    """
+    endings = sorted({t for t in (tokenizer.eos_token, tokenizer.pad_token) if t},
+                     key=lambda t: (-len(t), t))
+    text = text.strip()
+    while True:
+        for token in endings:
+            if text.endswith(token):
+                text = text[:-len(token)].rstrip()
+                break
+        else:
+            return text
+
+
 class HFBackend:
     def __init__(self, base_model, checkpoint=None, max_context=16384, revision=None):
         self.tokenizer, self.model = load_model(base_model, checkpoint, revision=revision)
@@ -102,13 +121,13 @@ class HFBackend:
             torch.manual_seed(seed)
             out = self.model.generate(**inputs, max_new_tokens=max_tokens,
                 do_sample=temperature > 0, pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
                 **({"temperature": temperature} if temperature > 0 else {}))
         ids = out[0, n:]
-        text = self.tokenizer.decode(ids, skip_special_tokens=False).strip()
-        # Preserve tool markers even when the tokenizer marks them special.
-        for token in {self.tokenizer.eos_token, self.tokenizer.pad_token}:
-            if token and text.endswith(token):
-                text = text[:-len(token)].rstrip()
+        # Stop on the same ChatML EOS used by the tokenizer/template, rather
+        # than a potentially different model-level generation default.
+        text = strip_generation_endings(
+            self.tokenizer.decode(ids, skip_special_tokens=False), self.tokenizer)
         result = {"text": text,
                 "prompt_tokens": n, "completion_tokens": len(ids),
                 "seconds": time.monotonic() - start,
