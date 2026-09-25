@@ -88,8 +88,8 @@ class WandbTracker:
             raise ValueError("Set WANDB_ENTITY to your W&B username or team before enabling tracking")
         # A loop owns the group; its subprocess stages discover the same manifest.
         experiment = next((p for p in (self.root, *self.root.parents)
-                           if (p / "loop.json").exists()), self.root)
-        manifest = next((experiment / name for name in ("loop.json", "run.json", "training_run.json")
+                           if any((p / name).exists() for name in ("loop.json", "benchmark_run.json"))), self.root)
+        manifest = next((experiment / name for name in ("loop.json", "benchmark_run.json", "run.json", "training_run.json")
                          if (experiment / name).exists()), None)
         metadata = _read(manifest) if manifest else {}
         group_file = experiment / "wandb_experiment.json"
