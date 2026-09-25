@@ -97,6 +97,9 @@ def train_sft(config, checkpoint, data_path, output):
             learning_rate=config.get("sft_learning_rate", 2e-5),
             num_train_epochs=config.get("sft_epochs", 1),
             max_steps=config.get("sft_max_steps", -1), bf16=torch.cuda.is_available(),
+            # load_model explicitly supports CUDA or CPU. Keep Trainer on the
+            # same device instead of implicitly selecting MPS on macOS tests.
+            use_cpu=not torch.cuda.is_available(),
             gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
             logging_steps=1, save_strategy="steps", save_steps=config.get("save_steps", 10),
             # W&B is owned by Monitor; avoid a second Trainer integration/run.

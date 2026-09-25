@@ -61,7 +61,7 @@ def checkpoint_identity(checkpoint):
 
 def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
              selection="counterfactual", backend=None, advisors=None):
-    allowed = {"collect": "train", "diagnose": "dev", "evaluate": "test"}
+    allowed = {"collect": "train", "diagnose": "dev", "assess": "dev", "evaluate": "test"}
     rows = load_rows(data, required_split=allowed[mode])
     rows = sorted(rows, key=lambda r: identity(r.question))
     if limit < 0:
@@ -107,7 +107,7 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
             question_context(row)
             progress(completed_examples=len(records), total_examples=len(rows), question_hash=identity(row.question))
             seed = (cfg.get("generation_seed", 1234) + int(identity(row.question)[:8], 16)) % (2 ** 31)
-            if mode == "evaluate":
+            if mode in {"evaluate", "assess"}:
                 direct, history = root_state(row, backend, cfg, seed)
                 from .answers import correct
                 policy = policy_rollout(row, backend, advisors, cfg, seed, direct, history)
