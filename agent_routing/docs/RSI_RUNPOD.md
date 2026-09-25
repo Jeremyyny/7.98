@@ -4,6 +4,8 @@
 
 原有 `python -m src.verifiable loop` 仍然是 SFT-only；本次必须使用 `python -m src.verifiable.rsi` 或下面的新脚本。不要把新结果混入原来的 `/workspace/margent-runs-restart-20260925`。
 
+若首次 smoke 报 `Unclosed tool call` / 全组非法动作，先按[协议恢复说明](RSI_PROTOCOL_RECOVERY.md)复用已有 SFT checkpoint 做只读检查。新语法约束需显式使用 `math_rsi_actions.json`，原配置不会偷偷改变。
+
 ## 1. 获取代码并检查
 
 在现有 RunPod 仓库中执行。只复制代码框内的命令，不要把 Markdown 反引号一起贴进终端。
@@ -40,7 +42,7 @@ tail -n 40 /workspace/margent-rsi-smoke-01.log
 ```
 
 该测试固定选取原 NuminaMath 划分的 2 train / 1 dev，使用真实 9B 模型：
-W&B check → 自有 advisor → doctor → 采集 → 1 步 SFT → 1 步 GRPO → 重载评估 → 1 步后续 SFT。
+W&B check → 自有 advisor → doctor → 采集 → 1 步 SFT → 动作格式预检 → 1 步 GRPO → 重载评估 → 1 步后续 SFT。
 后续 SFT 重用这两道题的首轮目标，只检查 GRPO adapter 能接着训练；它不验证第二轮重新采集或完整三组实验。
 保留 pilot 的长度、深度、4 条 GRPO 采样等设置，仅缩小数据、步数和 SFT 梯度累积。
 Manager 默认 GPU 1，发现已有计算进程就拒绝启动；advisor 使用 GPU 0 上自有的 8002 服务，不停止其他服务。

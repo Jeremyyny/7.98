@@ -29,6 +29,8 @@ def _digest(path):
 
 def load_config(path):
     cfg = json.loads(Path(path).read_text())
+    if cfg.get("decision_constraint", "none") not in {"none", "finite_actions_v1"}:
+        raise ValueError("Unknown decision constraint")
     for key in ("base_model", "advisor_url", "max_new_tokens", "advisor_max_tokens", "max_context",
                 "max_seq_len", "max_depth", "seed"):
         if key not in cfg:
@@ -95,7 +97,8 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
     pending = [r for r in rows if identity(r.question) not in seen]
     with Monitor(output, mode):
         if pending:
-            backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"], revision=cfg.get("base_model_revision"))
+            backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"], revision=cfg.get("base_model_revision"),
+                                           decision_constraint=cfg.get("decision_constraint", "none"))
             if advisors is None:
                 frozen = verify_advisor(cfg, root)
                 advisors = HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"),

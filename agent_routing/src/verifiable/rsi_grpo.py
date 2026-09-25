@@ -55,6 +55,17 @@ def turn_logprobs(model, turn, temperature):
     if logits.shape[0] != len(response):
         raise ValueError("Model did not honor logits_to_keep; refusing misaligned loss")
     targets = ids[0, -len(response):]
+    if turn.get("action_paths") is not None:
+        from .actions import ActionTrie
+        trie = ActionTrie(turn["action_paths"])
+        if response not in trie.paths:
+            raise ValueError("Scoring incomplete/illegal constrained action")
+        values = []
+        for index, target in enumerate(response):
+            allowed = trie.allowed(response[:index])
+            selected = logits[index, allowed].float() / temperature
+            values.append(selected[allowed.index(target)] - selected.logsumexp(0))
+        return torch.stack(values)
     # Chunk vocabulary normalization to reduce peak float32 activation memory.
     chunks = []
     for start in range(0, len(response), 64):
@@ -69,6 +80,7 @@ class RolloutBackend(HFBackend):
         self.tokenizer, self.model = tokenizer, model
         self.max_context = min(config["max_context"], config["max_seq_len"])
         self.rl_temperature = config["rl_temperature"]
+        self.decision_constraint = config.get("decision_constraint", "none")
         self.turns = None
 
     def generate(self, messages, tools=None, max_tokens=2048, temperature=0., seed=42,
@@ -90,11 +102,19 @@ class RolloutBackend(HFBackend):
             pad_token_id=self.tokenizer.pad_token_id, use_cache=True)
         devices = [self.model.device.index or 0] if self.model.device.type == "cuda" else []
         start = time.monotonic()
+        paths, grammar = None, {}
+        if tools and self.decision_constraint == "finite_actions_v1":
+            from .actions import ActionTrie, decision_paths
+            paths = decision_paths(self.tokenizer, messages, tools, max_tokens)
+            grammar = ActionTrie(paths).generation_kwargs(n)
         with torch.random.fork_rng(devices=devices), torch.inference_mode():
             torch.manual_seed(seed)
-            ids = self.model.generate(**inputs, generation_config=gen)[0, n:].tolist()
+            ids = self.model.generate(**inputs, generation_config=gen, **grammar)[0, n:].tolist()
+        if paths is not None and ids not in paths:
+            raise ValueError("Constrained decision did not finish a legal action")
         self.turns.append({"prompt_ids": inputs.input_ids[0].tolist(), "completion_ids": ids,
-                           "kind": "decision" if tools else "revision"})
+                           "kind": "decision" if tools else "revision",
+                           **({"action_paths": paths} if paths is not None else {})})
         result = {"text": strip_generation_endings(self.tokenizer.decode(ids, skip_special_tokens=False), self.tokenizer),
                   "prompt_tokens": n, "completion_tokens": len(ids),
                   "seconds": time.monotonic() - start,
@@ -185,6 +205,11 @@ def train_grpo(config, checkpoint, data_path, output):
                 outcome = policy_rollout(row, backend, advisors, config, seed + sample + 1, direct, history)
                 trajectories.append({"turns": backend.turns, "outcome": outcome, "reward": float(outcome["correct"])})
             backend.turns = None
+            if not any(t["outcome"]["valid"] for t in trajectories):
+                atomic_json(root / "invalid_group.json", {"step": step + 1,
+                    "reason": "All rollouts invalid; no optimizer update performed for this group",
+                    "root": direct, "trajectories": trajectories})
+                raise RuntimeError("All GRPO rollouts invalid; inspect invalid_group.json before training")
             advantages = group_advantages([t["reward"] for t in trajectories])
             # Score old and frozen reference before any optimizer update.
             for adapter, field in (("default", "old"), ("rsi_reference", "reference")):
@@ -198,6 +223,7 @@ def train_grpo(config, checkpoint, data_path, output):
             model.train()
             optimizer.zero_grad(set_to_none=True)
             loss_value = 0.
+            policy_loss_value, kl_loss_value = 0., 0.
             manager_tokens = 0
             for trajectory, advantage in zip(trajectories, advantages):
                 token_count = sum(len(t["completion_ids"]) for t in trajectory["turns"])
@@ -206,15 +232,24 @@ def train_grpo(config, checkpoint, data_path, output):
                 manager_tokens += token_count
                 for turn in trajectory["turns"]:
                     lp = turn_logprobs(model, turn, config["rl_temperature"])
-                    loss = token_objective(lp, turn["old"].to(lp.device), turn["reference"].to(lp.device), advantage,
-                        config.get("rl_clip", .2), config.get("rl_beta", .01)).sum() / (token_count * len(trajectories))
+                    old, reference = turn["old"].to(lp.device), turn["reference"].to(lp.device)
+                    scale = token_count * len(trajectories)
+                    policy_loss = token_objective(lp, old, reference, advantage, config.get("rl_clip", .2), 0.).sum() / scale
+                    kl_loss = token_objective(lp, old, reference, 0., config.get("rl_clip", .2), config.get("rl_beta", .01)).sum() / scale
+                    loss = policy_loss + kl_loss
                     if not torch.isfinite(loss):
                         raise FloatingPointError("Nonfinite GRPO loss")
                     loss.backward()
                     loss_value += float(loss.detach())
+                    policy_loss_value += float(policy_loss.detach())
+                    kl_loss_value += float(kl_loss.detach())
             norm = torch.nn.utils.clip_grad_norm_(params, config.get("rl_max_grad_norm", 1.), error_if_nonfinite=True)
             optimizer.step()
             report = {"step": step + 1, "loss": loss_value, "gradient_norm": float(norm),
+                "policy_loss": policy_loss_value, "weighted_kl_loss": kl_loss_value,
+                "old_reference_max_abs_logp_difference": max(
+                    float((turn["old"] - turn["reference"]).abs().max())
+                    for t in trajectories for turn in t["turns"]),
                 "rewards": [t["reward"] for t in trajectories], "advantages": advantages,
                 "mixed_reward_group": len({t["reward"] for t in trajectories}) > 1,
                 "calls": [t["outcome"]["calls"] for t in trajectories],

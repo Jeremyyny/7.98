@@ -105,8 +105,8 @@ def evidence(root):
         if metrics["optimizer_steps"] != 1 or not math.isfinite(metrics["train_loss"]):
             raise ValueError(f"Invalid SFT training result: {name}")
     links = [json.loads(p.read_text()) for p in root.glob("*/wandb_link.json")]
-    if len(links) != 6 or any(link.get("mode") != "online" or not link.get("url") for link in links):
-        raise ValueError("Expected six online W&B runs for logging check and five model stages")
+    if len(links) != 7 or any(link.get("mode") != "online" or not link.get("url") for link in links):
+        raise ValueError("Expected seven online W&B runs including decision preflight")
     learning = bool(step["mixed_reward_group"] and step["gradient_norm"] > 0 and grpo_changed)
     return {"status": "plumbing_passed", "paper_result": False,
         "grpo_learning_signal_observed": learning,
@@ -197,6 +197,9 @@ def main():
 
         model_stage("collection", "collect", cfg["base_model"], root / "data/train.jsonl")
         model_stage("sft", "sft", cfg["base_model"], root / "collection/sft.jsonl")
+        stage("decision_check", [str(REPO / "scripts/runpod_rsi_decision_check.py"),
+            "--source", str(root), "--out", str(root / "decision_check"),
+            "--require-mode", cfg.get("decision_constraint", "none")])
         model_stage("grpo", "grpo", root / "sft", root / "data/train.jsonl")
         model_stage("after_grpo", "assess", root / "grpo", root / "data/dev.jsonl")
         model_stage("next_sft", "sft", root / "grpo", root / "collection/sft.jsonl")
@@ -207,6 +210,14 @@ def main():
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
     except BaseException as exc:
         write(root / "smoke_status.json", {"status": "failed", "stage": current, "error": str(exc)})
+        failed = {"status": "failed", "stage": current, "error": str(exc), "paper_result": False,
+                  "grpo_steps": [], "note": "Failure report; not a pass or proof of learning"}
+        for path in root.glob("grpo/step-*/step.json"):
+            try:
+                failed["grpo_steps"].append(json.loads(path.read_text()))
+            except (ValueError, OSError):
+                pass
+        write(root / "smoke_report.json", failed)
         (root / "error.log").write_text(traceback.format_exc())
         raise
     finally:

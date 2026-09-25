@@ -32,7 +32,7 @@ def test_busy_manager_gpu_refuses_duplicate(monkeypatch):
 def fixtures(root):
     import torch
     from safetensors.torch import save_file
-    for name in ("wandb_check", "collection", "sft", "grpo", "after_grpo", "next_sft"):
+    for name in ("wandb_check", "decision_check", "collection", "sft", "grpo", "after_grpo", "next_sft"):
         stage = root / name
         stage.mkdir()
         smoke.write(stage / "wandb_link.json", {"mode": "online", "url": "https://wandb.ai/example"})

@@ -105,9 +105,12 @@ def strip_generation_endings(text, tokenizer):
 
 
 class HFBackend:
-    def __init__(self, base_model, checkpoint=None, max_context=16384, revision=None):
+    def __init__(self, base_model, checkpoint=None, max_context=16384, revision=None, decision_constraint="none"):
         self.tokenizer, self.model = load_model(base_model, checkpoint, revision=revision)
         self.max_context = max_context
+        if decision_constraint not in {"none", "finite_actions_v1"}:
+            raise ValueError("Unknown decision constraint")
+        self.decision_constraint = decision_constraint
 
     def generate(self, messages, tools=None, max_tokens=2048, temperature=0.0, seed=42,
                  generation_options=None):
@@ -121,13 +124,21 @@ class HFBackend:
             raise ValueError(f"Context budget exceeded: {n} + {max_tokens} > {self.max_context}; no silent truncation")
         devices = [self.model.device.index or 0] if self.model.device.type == "cuda" else []
         start = time.monotonic()
+        grammar = {}
+        paths = None
+        if tools and getattr(self, "decision_constraint", "none") == "finite_actions_v1":
+            from .actions import ActionTrie, decision_paths
+            paths = decision_paths(self.tokenizer, messages, tools, max_tokens)
+            grammar = ActionTrie(paths).generation_kwargs(n)
         with torch.random.fork_rng(devices=devices), torch.inference_mode():
             torch.manual_seed(settings["seed"])
             out = self.model.generate(**inputs, max_new_tokens=max_tokens,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                **generation_kwargs(settings, n))
+                **generation_kwargs(settings, n), **grammar)
         ids = out[0, n:]
+        if paths is not None and ids.tolist() not in paths:
+            raise ValueError("Constrained decision did not finish a legal action")
         # Stop on the same ChatML EOS used by the tokenizer/template, rather
         # than a potentially different model-level generation default.
         text = strip_generation_endings(

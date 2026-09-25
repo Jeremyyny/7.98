@@ -225,6 +225,31 @@ def test_real_rollout_sampler_scores_exact_distribution(tmp_path):
     assert torch.allclose(lp, actual, atol=1e-5), (lp, actual)
 
 
+def test_all_invalid_group_retains_evidence_without_updating(tmp_path, monkeypatch):
+    from src.verifiable.rsi_grpo import train_grpo
+    from src.utils.io import write_jsonl
+    monkeypatch.setenv("MARGENT_WANDB_MODE", "disabled")
+    base, checkpoint = tiny_checkpoint(tmp_path)
+    row = StandardRow(0, "tiny", "math", "one plus one", {}, "2", split="train", metadata={"answer_type": "math"})
+    data = tmp_path / "train.jsonl"
+    write_jsonl(str(data), [row.to_dict()])
+    cfg = dict(base_model=str(base), seed=42, advisor_url="unused", advisor_max_tokens=8,
+        max_context=4096, max_seq_len=4096, rl_temperature=.8, rl_max_steps=1,
+        num_generations=2, lora_rank=2)
+    def invalid(row, backend, *args):
+        backend.turns.append(dict(prompt_ids=[2, 4], completion_ids=[7, 3], kind="decision"))
+        return dict(correct=False, valid=False, error="Unclosed tool call")
+    with patch("src.verifiable.rsi_grpo.verify_advisor", return_value={}), \
+         patch("src.verifiable.rsi_grpo.root_state", return_value=({"text": "candidate"}, [])), \
+         patch("src.verifiable.rsi_grpo.policy_rollout", side_effect=invalid):
+        with pytest.raises(RuntimeError, match="All GRPO rollouts invalid"):
+            train_grpo(cfg, str(checkpoint), str(data), str(tmp_path / "rejected"))
+    root = tmp_path / "rejected"
+    assert len(json.loads((root / "invalid_group.json").read_text())["trajectories"]) == 2
+    assert not (root / "training_metrics.json").exists()
+    assert not (root / "resume.json").exists()
+
+
 def test_report_pairs_questions_and_preserves_regressions(tmp_path):
     from src.verifiable.rsi import report
     from src.utils.io import write_jsonl
