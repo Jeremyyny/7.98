@@ -19,6 +19,9 @@ QUESTION_COLUMNS = [
     "policy_calls", "self_continue_text", "self_continue_correct", "actual_completion_tokens",
     "generation_seconds", "clipped_fields",
 ]
+ROLLOUT_COLUMNS = ["source", "step", "sample", "question_hash", "question", "reward", "advantage",
+    "valid", "failure_type", "error", "calls", "root_valid", "root_truncated", "root_text",
+    "final_text", "decisions", "manager_outputs", "clipped_fields"]
 
 
 def question_info(record):

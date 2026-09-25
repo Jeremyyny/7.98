@@ -63,12 +63,28 @@ CUDA_VISIBLE_DEVICES=1 /workspace/margent-venv/bin/python -u scripts/runpod_rsi_
 
 The orchestrator assigns physical GPUs to its subprocesses itself. It creates
 its own advisor, runs SFT, then requires the decision check to pass before GRPO.
-Any all-invalid GRPO group saves `invalid_group.json` and aborts before that
-group's optimizer update. Mixed valid/invalid outcomes keep their original
-binary rewards; there is no hidden resampling. Zero-advantage groups are still
+Any all-invalid GRPO group saves `invalid_group.json` and continues with its
+original zero rewards and zero advantages. KL regularization may still update
+weights; that is not outcome learning. Mixed valid/invalid outcomes keep their
+original binary rewards; there is no hidden resampling. Zero-advantage groups are still
 identified as lacking outcome signal; they are not recast as successful RL.
 Reports separate policy loss from weighted KL loss and record the old/reference
 log-probability discrepancy. Failures now also produce `smoke_report.json`.
 
 This does not add email alerts or stop Pod billing. Run the short read-only
 check first; do not launch the full benchmark before reviewing its report.
+
+## 4. View saved results without rerunning training
+
+After updating main, run `bash scripts/review_rsi_smoke.sh` from `agent_routing`.
+The default source is `/workspace/margent-rsi-smoke-actions-01`; pass another
+source directory as the first argument if needed. This CPU-only review uploads
+reward mean/std, validity rates, advantages, per-rollout text and failure causes
+to a new `smoke_review` run in W&B. Exact saved JSON evidence is attached as an
+artifact. Original run files, statuses and rewards are never overwritten.
+
+New smoke runs report execution completion separately from rollout quality and
+outcome-learning evidence. Invalid samples produce warnings and retain zero
+rewards; they no longer fail the entire completed smoke. Missing checkpoints,
+nonfinite training or runtime exceptions still fail. This smoke has one GRPO
+update and a second SFT update, not a complete two-round RSI benchmark.

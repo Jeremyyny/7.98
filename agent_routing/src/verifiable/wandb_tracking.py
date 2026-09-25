@@ -123,6 +123,7 @@ class WandbTracker:
             settings=wandb.Settings(init_timeout=60, console="off", disable_git=True, save_code=False))
         self.run.define_metric("trainer_step")
         self.run.define_metric("train/*", step_metric="trainer_step")
+        self.run.define_metric("grpo/*", step_metric="trainer_step")
         self.run.define_metric("diagnostic_step")
         for pattern in ("eval/*", "internalization/*", "delegation/*"):
             self.run.define_metric(pattern, step_metric="diagnostic_step")
@@ -145,12 +146,14 @@ class WandbTracker:
     def log_text(self, kind, record):
         if self.run is None or not self.text_enabled:
             return
-        from .debug_records import (GENERATION_COLUMNS, QUESTION_COLUMNS,
+        from .debug_records import (GENERATION_COLUMNS, QUESTION_COLUMNS, ROLLOUT_COLUMNS,
                                     generation_values, question_values, table_row)
         if kind == "generation":
             columns, values = GENERATION_COLUMNS, generation_values(record)
         elif kind == "question":
             columns, values = QUESTION_COLUMNS, question_values(record, record.get("source", "live"))
+        elif kind == "rollout":
+            columns, values = ROLLOUT_COLUMNS, record
         else:
             raise ValueError(f"Unknown text table: {kind}")
         # SDK incremental tables do not resume their in-memory cursor. Separate

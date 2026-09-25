@@ -261,6 +261,13 @@ def completed_question(record):
         ACTIVE.completed_question(record)
 
 
+def rollout(record):
+    if ACTIVE:
+        with ACTIVE.lock:
+            append_jsonl(str(ACTIVE.root / "rollout_diagnostics.jsonl"), [record])
+            ACTIVE.log_text("rollout", record)
+
+
 def metrics(values, namespace="", **axes):
     if ACTIVE:
         ACTIVE.metrics(values, namespace, **axes)

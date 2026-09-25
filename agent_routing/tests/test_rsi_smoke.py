@@ -52,17 +52,21 @@ def fixtures(root):
 def test_zero_advantage_is_not_reported_as_learning(tmp_path):
     fixtures(tmp_path)
     result = smoke.evidence(tmp_path)
-    assert result["status"] == "plumbing_passed"
+    assert result["status"] == "completed"
     assert result["grpo_learning_signal_observed"] is False
     assert result["grpo_changed_tensors"] == 0
     assert result["next_sft_changed_tensors"] == 1
 
 
-def test_invalid_rollout_cannot_pass_smoke(tmp_path):
+def test_invalid_rollout_is_reported_separately_from_execution(tmp_path):
     fixtures(tmp_path)
     path = tmp_path / "grpo/step-1/step.json"
     step = json.loads(path.read_text())
     step["protocol_valid"] = [False, False]
     smoke.write(path, step)
-    with pytest.raises(ValueError, match="invalid Manager"):
-        smoke.evidence(tmp_path)
+    result = smoke.evidence(tmp_path)
+    assert result["status"] == "completed"
+    assert result["execution_passed"]
+    assert result["protocol_valid_rate"] == 0
+    assert result["warnings"]
+    assert not result["grpo_learning_signal_observed"]

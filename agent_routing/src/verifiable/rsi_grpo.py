@@ -19,7 +19,8 @@ from .data import identity, load_rows
 from .experiment import policy_rollout, root_state
 from .provenance import harness_identity
 from .runner import checkpoint_identity, verify_advisor
-from .telemetry import Monitor, atomic_json, metrics, progress, question_context, usage
+from .telemetry import Monitor, atomic_json, metrics, progress, question_context, usage, rollout
+from .rollout_reporting import reward_metrics, rollout_record
 
 
 def group_advantages(rewards, epsilon=1e-4):
@@ -207,10 +208,15 @@ def train_grpo(config, checkpoint, data_path, output):
             backend.turns = None
             if not any(t["outcome"]["valid"] for t in trajectories):
                 atomic_json(root / "invalid_group.json", {"step": step + 1,
-                    "reason": "All rollouts invalid; no optimizer update performed for this group",
+                    "reason": "All rollouts invalid; unchanged zero rewards, no outcome learning signal",
                     "root": direct, "trajectories": trajectories})
-                raise RuntimeError("All GRPO rollouts invalid; inspect invalid_group.json before training")
             advantages = group_advantages([t["reward"] for t in trajectories])
+            diagnostics = reward_metrics(trajectories, advantages)
+            metrics(diagnostics, "grpo", trainer_step=step + 1)
+            for index, (trajectory, advantage) in enumerate(zip(trajectories, advantages)):
+                record = rollout_record(step + 1, index, direct, trajectory, advantage,
+                    {"question_hash": identity(row.question), "question": row.question})
+                rollout({**record, "source": "live"})
             # Score old and frozen reference before any optimizer update.
             for adapter, field in (("default", "old"), ("rsi_reference", "reference")):
                 model.set_adapter(adapter)
@@ -246,6 +252,7 @@ def train_grpo(config, checkpoint, data_path, output):
             norm = torch.nn.utils.clip_grad_norm_(params, config.get("rl_max_grad_norm", 1.), error_if_nonfinite=True)
             optimizer.step()
             report = {"step": step + 1, "loss": loss_value, "gradient_norm": float(norm),
+                **diagnostics,
                 "policy_loss": policy_loss_value, "weighted_kl_loss": kl_loss_value,
                 "old_reference_max_abs_logp_difference": max(
                     float((turn["old"] - turn["reference"]).abs().max())

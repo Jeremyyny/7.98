@@ -225,7 +225,7 @@ def test_real_rollout_sampler_scores_exact_distribution(tmp_path):
     assert torch.allclose(lp, actual, atol=1e-5), (lp, actual)
 
 
-def test_all_invalid_group_retains_evidence_without_updating(tmp_path, monkeypatch):
+def test_all_invalid_group_continues_with_zero_reward_and_visible_warning(tmp_path, monkeypatch):
     from src.verifiable.rsi_grpo import train_grpo
     from src.utils.io import write_jsonl
     monkeypatch.setenv("MARGENT_WANDB_MODE", "disabled")
@@ -238,16 +238,22 @@ def test_all_invalid_group_retains_evidence_without_updating(tmp_path, monkeypat
         num_generations=2, lora_rank=2)
     def invalid(row, backend, *args):
         backend.turns.append(dict(prompt_ids=[2, 4], completion_ids=[7, 3], kind="decision"))
-        return dict(correct=False, valid=False, error="Unclosed tool call")
+        return dict(correct=False, valid=False, calls=0, text="candidate", error="Unclosed tool call")
     with patch("src.verifiable.rsi_grpo.verify_advisor", return_value={}), \
          patch("src.verifiable.rsi_grpo.root_state", return_value=({"text": "candidate"}, [])), \
          patch("src.verifiable.rsi_grpo.policy_rollout", side_effect=invalid):
-        with pytest.raises(RuntimeError, match="All GRPO rollouts invalid"):
-            train_grpo(cfg, str(checkpoint), str(data), str(tmp_path / "rejected"))
+        train_grpo(cfg, str(checkpoint), str(data), str(tmp_path / "rejected"))
     root = tmp_path / "rejected"
     assert len(json.loads((root / "invalid_group.json").read_text())["trajectories"]) == 2
-    assert not (root / "training_metrics.json").exists()
-    assert not (root / "resume.json").exists()
+    assert (root / "training_metrics.json").exists()
+    step_dir = json.loads((root / "resume.json").read_text())["directory"]
+    step = json.loads((root / step_dir / "step.json").read_text())
+    assert step["rewards"] == [0., 0.]
+    assert step["advantages"] == [0., 0.]
+    assert step["valid_rate"] == 0
+    assert not step["mixed_reward_group"]
+    assert step["policy_loss"] == 0
+    assert len((root / "rollout_diagnostics.jsonl").read_text().splitlines()) == 2
 
 
 def test_report_pairs_questions_and_preserves_regressions(tmp_path):

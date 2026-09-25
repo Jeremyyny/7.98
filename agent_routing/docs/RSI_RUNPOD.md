@@ -49,7 +49,9 @@ Manager 默认 GPU 1，发现已有计算进程就拒绝启动；advisor 使用 
 测试最多 60 分钟，退出时关闭自己启动的子进程及 advisor；不会关闭 Pod 或停止其他服务计费。
 输出目录必须全新；修复失败后用 `--out` 指定新目录，不能覆盖证据。固定端口也避免同一 smoke 的重复启动。
 
-`smoke_report.json` 的 `plumbing_passed` 只说明流程和 checkpoint 重载通过。
+`smoke_report.json` 的 `completed` / `execution_passed` 只说明流程和 checkpoint 重载通过。
+非法采样比例和缺少奖励差异记为警告，不再把已完成的流程判失败；奖励仍按原规则计分。
+已有运行可用 `bash scripts/review_rsi_smoke.sh` 上传汇总和逐条输出，无需重跑训练。
 `grpo_learning_signal_observed` 需要混合奖励、非零梯度和实际 adapter 变化，可能为 false。
 真实题上没有可用 SFT 目标、非法格式、截断、OOM 或超时都会保留日志并停止，不换题或伪造奖励使测试通过。
 本测试不验证中断后的 optimizer 恢复，不触碰 AIME/BeyondAIME，也不配置或发送邮件告警。
