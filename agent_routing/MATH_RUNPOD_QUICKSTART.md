@@ -117,6 +117,29 @@ python -m src.verifiable freeze-config --config configs/math_rsi.json \
 
 ## 5. 在 GPU 0 启动冻结 subagent
 
+### 可选：冻结 advisor 采样设置
+
+默认仍为 greedy。若 smoke 诊断确认需要采样，可在**新运行目录的新配置**中加入：
+
+```json
+"advisor_generation": {
+  "temperature": 0.7,
+  "top_p": 0.8,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 1.5,
+  "repetition_penalty": 1.0,
+  "seed": 42
+}
+```
+
+该设置作用于三个冻结 advisor 角色，Manager 的 `temperature=0` 保持不变。
+每个请求重设固定 seed，缓存键包含完整生成设置；不会依据正确答案换种子重试。
+服务端回传生成参数供客户端核对，旧服务无法确认时会报错，必须重启同版 advisor。
+诊断重放和正式服务共用 presence penalty 实现，仅对已生成 token 各减一次对应 logit。
+参数属于实验协议，所有正式对照组应共用同一固定设置；不要把 greedy 和 sampled 的历史结果混为同一配置。
+保留原始回复和截断报错，不能只截取正确结论。一次失败请求在少数种子下不截断，不能证明整体可靠性。
+
 打开第二个终端或 tmux 会话；保持它运行。所有终端先进入相同目录并激活环境。
 
 ```bash
@@ -244,6 +267,26 @@ python -m src.verifiable paper-check \
 检查通过不代表结果为正、统计显著或论文一定录用。最终答案校验也不是中间步骤验证。
 
 ## 10. 监控、暂停与恢复
+
+### 仅诊断一个失败的 advisor 调用
+
+若出现长回复或重复直到截断，可先重放已保存的最后一次失败调用，不必重新运行整个 smoke。
+以下脚本在选定 GPU 上自行加载一次原配置固定版本的基础模型，不连接 advisor 服务。
+它对同一组原始消息比较固定/原生 non-thinking 模板以及 greedy/采样解码；
+采样采用 Qwen 模型卡 non-thinking general 的 `temperature=0.7, top_p=0.8, top_k=20, min_p=0, presence_penalty=1.5, repetition_penalty=1`。
+它固定 seed=42，每种设置最多 512 token；模板渲染和结束符相同时跳过原生模板的重复生成。
+确保所选 GPU 上没有其他模型进程。
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python scripts/replay_math_advisor.py \
+  --run-dir "$MARGENT_RUN_ROOT/smoke-loop/initial_dev" \
+  --out "/workspace/margent-advisor-replay-$(date +%Y%m%d-%H%M%S)"
+```
+
+开启 `MARGENT_WANDB_MODE=online` 和 `MARGENT_WANDB_TEXT=1` 后，输出进入独立 W&B run 的
+`debug/generations_*` 表格，`phase` 标明设置。原始解码文本、渲染后的 prompt 和汇总也保存在新目录。
+诊断不会修改原实验、重标标签或训练，达到 512 上限仍明确记为截断。
+一次请求、一个种子的结果不能证明正式配置稳定；先看输出，再决定后续实验配置。
 
 ```bash
 python -m src.verifiable status --run-dir "$MARGENT_RUN_ROOT/dynamic_sft_s42"

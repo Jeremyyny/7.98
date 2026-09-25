@@ -41,7 +41,9 @@ def load_config(path):
         if cfg[key] <= 0:
             raise ValueError(f"{key} must be positive")
     if cfg.get("temperature", 0) != 0:
-        raise ValueError("Paper protocol uses deterministic generation (temperature=0)")
+        raise ValueError("Manager generation requires temperature=0")
+    from .sampling import normalize_generation
+    normalize_generation(cfg.get("advisor_generation"))
     if cfg.get("decision_max_tokens", 128) <= 0:
         raise ValueError("decision_max_tokens must be positive")
     return cfg
@@ -59,7 +61,7 @@ def checkpoint_identity(checkpoint):
 
 def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
              selection="counterfactual", backend=None, advisors=None):
-    allowed = {"collect": "train", "diagnose": "dev", "evaluate": "test"}
+    allowed = {"collect": "train", "diagnose": "dev", "assess": "dev", "evaluate": "test"}
     rows = load_rows(data, required_split=allowed[mode])
     rows = sorted(rows, key=lambda r: identity(r.question))
     if limit < 0:
@@ -96,7 +98,8 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
             backend = backend or HFBackend(cfg["base_model"], checkpoint, cfg["max_context"], revision=cfg.get("base_model_revision"))
             if advisors is None:
                 frozen = verify_advisor(cfg, root)
-                advisors = HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"))
+                advisors = HTTPAdvisors(cfg["advisor_url"], cfg["advisor_max_tokens"], cfg.get("advisor_models"),
+                                       generation_options=cfg.get("advisor_generation"))
                 if not cfg.get("external_advisor_identity"):
                     advisors.identity = frozen
         started = time.monotonic()
@@ -104,7 +107,7 @@ def run_data(cfg, data, checkpoint, output, mode, resume=False, limit=0,
             question_context(row)
             progress(completed_examples=len(records), total_examples=len(rows), question_hash=identity(row.question))
             seed = (cfg.get("generation_seed", 1234) + int(identity(row.question)[:8], 16)) % (2 ** 31)
-            if mode == "evaluate":
+            if mode in {"evaluate", "assess"}:
                 direct, history = root_state(row, backend, cfg, seed)
                 from .answers import correct
                 policy = policy_rollout(row, backend, advisors, cfg, seed, direct, history)

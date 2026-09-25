@@ -19,3 +19,14 @@ advantage.
 Snapshot lineage: forked from `research_6.8` (rule_applier era); synced to the
 2026-07-03 codebase. See the migration table at the top of EXPERIMENTS.md
 before reusing any artifacts produced by the old snapshot.
+
+## RSI math pilot
+
+The `codex/math-wandb-debug-tables` branch includes a bounded two-round
+collect → SFT → GRPO pilot with dynamic MARGENT, static-data, and
+successful-trajectory controls. This uses `python -m src.verifiable.rsi`;
+the historical SFT-only loop and disabled legacy RL entry point are unchanged.
+
+- [RunPod setup and commands](agent_routing/docs/RSI_RUNPOD.md)
+- [Literature review and experiment design](agent_routing/docs/RSI_RESEARCH_DESIGN.md)
+- [Validation and GPU limitations](agent_routing/docs/RSI_VALIDATION.md)

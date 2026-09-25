@@ -3,10 +3,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+from contextlib import nullcontext
 
 from src.benchmarks.base import StandardRow
 from src.utils.io import write_jsonl
 from src.verifiable.answers import correct, equivalent, extract_final
+from src.verifiable.backend import HFBackend, strip_generation_endings
 from src.verifiable.data import identity, normalize, partition, prepare, verify_manifest
 from src.verifiable.experiment import collect_one, compare, policy_rollout, sft_rows, summary
 from src.verifiable.protocol import advisor_messages, messages, parse_calls
@@ -48,6 +52,85 @@ class Advisors:
         self.calls.append((kind, problem.question, draft))
         return {"text": "Useful advice", "prompt_tokens": 5, "completion_tokens": 10,
                 "seconds": 0.001, "truncated": False}
+
+
+class GenerationEndingsTest(unittest.TestCase):
+    def test_repeated_eos_and_mixed_padding(self):
+        answer = "Reasoning.\nFINAL_ANSWER: \\boxed{25}"
+        for pad in ("<|im_end|>", "<|endoftext|>", None):
+            tok = SimpleNamespace(eos_token="<|im_end|>", pad_token=pad)
+            for suffix in ("<|im_end|>", "<|im_end|>" * 3,
+                           "<|im_end|> \n" + (pad or "") * 2):
+                with self.subTest(pad=pad, suffix=suffix):
+                    text = strip_generation_endings(answer + suffix, tok)
+                    self.assertEqual(text, answer)
+                    self.assertTrue(correct(text, "25"))
+
+    def test_tools_and_commit_preserved(self):
+        tok = SimpleNamespace(eos_token="<|im_end|>", pad_token="<|im_end|>")
+        call = '<tool_call>{"name":"verifier_tool","arguments":{}}</tool_call>'
+        clean = strip_generation_endings(call + "<|im_end|>" * 2, tok)
+        content, calls = parse_calls(clean)
+        self.assertEqual(content, "")
+        self.assertEqual(calls[0]["name"], "verifier_tool")
+        self.assertEqual(strip_generation_endings("COMMIT<|im_end|>", tok), "COMMIT")
+
+    def test_does_not_relax_answer_validation(self):
+        tok = SimpleNamespace(eos_token="<|im_end|>", pad_token=None)
+        for bad in (r"FINAL_ANSWER: \boxed{25} or 26", r"FINAL_ANSWER: \boxed{24}",
+                    "FINAL_ANSWER: \\boxed{25}\nI disagree",
+                    "FINAL_ANSWER: \\boxed{24}\nFINAL_ANSWER: \\boxed{25}"):
+            self.assertFalse(correct(strip_generation_endings(bad + "<|im_end|>", tok), "25"))
+        interior = "Quoted <|im_end|> marker\nFINAL_ANSWER: \\boxed{25}"
+        self.assertEqual(strip_generation_endings(interior, tok), interior)
+
+    def test_generate_passes_chatml_eos_and_retains_truncation(self):
+        class Inputs(dict):
+            def to(self, device):
+                return self
+        class Output:
+            def __init__(self, ids):
+                self.ids = ids
+            def __getitem__(self, key):
+                return self.ids
+        class Tokenizer:
+            eos_token, pad_token = "<|im_end|>", "<|endoftext|>"
+            eos_token_id, pad_token_id = 7, 8
+            def apply_chat_template(self, *args, **kwargs):
+                return "prompt"
+            def __call__(self, *args, **kwargs):
+                return Inputs(input_ids=SimpleNamespace(shape=(1, 3)))
+            def decode(self, ids, **kwargs):
+                return "FINAL_ANSWER: \\boxed{25}" + ("<|im_end|>" if ids[-1] == 7 else "")
+        class Model:
+            device = SimpleNamespace(type="cpu")
+            def generate(self, **kwargs):
+                self.kwargs = kwargs
+                return Output(self.ids)
+        backend = HFBackend.__new__(HFBackend)
+        backend.tokenizer, backend.model, backend.max_context = Tokenizer(), Model(), 100
+        seeds = []
+        fake_torch = SimpleNamespace(random=SimpleNamespace(fork_rng=lambda devices: nullcontext()),
+                                     inference_mode=nullcontext, manual_seed=seeds.append)
+        sampled = {"temperature": 0.7, "seed": 43, "top_p": 0.8, "top_k": 20,
+                   "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0}
+        with patch.dict("sys.modules", {"torch": fake_torch,
+                                        "transformers": SimpleNamespace(LogitsProcessorList=list)}):
+            for ids, truncated, settings in (([1, 7], False, None), ([1, 2], True, None),
+                                             ([1, 7], False, sampled)):
+                backend.model.ids = ids
+                result = backend.generate([], max_tokens=2, generation_options=settings)
+                self.assertEqual(backend.model.kwargs["eos_token_id"], 7)
+                self.assertEqual(result["truncated"], truncated)
+                self.assertEqual(result["completion_tokens"], 2)
+                self.assertEqual(result["text"], r"FINAL_ANSWER: \boxed{25}")
+                self.assertEqual(backend.model.kwargs["do_sample"], settings is not None)
+                if settings:
+                    self.assertEqual(seeds[-1], 43)
+                    self.assertEqual(backend.model.kwargs["temperature"], 0.7)
+                    self.assertEqual(backend.model.kwargs["top_p"], 0.8)
+                    self.assertEqual(backend.model.kwargs["top_k"], 20)
+                    self.assertEqual(len(backend.model.kwargs["logits_processor"]), 1)
 
 
 class AnswersTest(unittest.TestCase):

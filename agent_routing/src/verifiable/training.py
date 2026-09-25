@@ -97,6 +97,9 @@ def train_sft(config, checkpoint, data_path, output):
             learning_rate=config.get("sft_learning_rate", 2e-5),
             num_train_epochs=config.get("sft_epochs", 1),
             max_steps=config.get("sft_max_steps", -1), bf16=torch.cuda.is_available(),
+            # load_model explicitly supports CUDA or CPU. Keep Trainer on the
+            # same device instead of implicitly selecting MPS on macOS tests.
+            use_cpu=not torch.cuda.is_available(),
             gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
             logging_steps=1, save_strategy="steps", save_steps=config.get("save_steps", 10),
             # W&B is owned by Monitor; avoid a second Trainer integration/run.
@@ -251,7 +254,8 @@ def _legacy_train_rl(config, checkpoint, data_path, output):
             root_costs.append({k: root[k] for k in ("prompt_tokens", "completion_tokens", "seconds", "truncated")})
         append_jsonl(str(Path(output) / "root_generation_usage.jsonl"), root_costs)
         model.train()
-        advisors = HTTPAdvisors(config["advisor_url"], config["advisor_max_tokens"], config.get("advisor_models"))
+        advisors = HTTPAdvisors(config["advisor_url"], config["advisor_max_tokens"], config.get("advisor_models"),
+                               generation_options=config.get("advisor_generation"))
         count = config.get("num_generations", 4)
         accumulation = config.get("rl_accumulation", count)
         if accumulation % count:
